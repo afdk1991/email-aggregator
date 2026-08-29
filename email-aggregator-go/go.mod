@@ -8,6 +8,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.66
 	github.com/opensearch-project/opensearch-go/v2 v2.3.0
 	github.com/segmentio/kafka-go v0.4.47
+	golang.org/x/text v0.22.0
 )
 
 require (
@@ -28,8 +29,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/net v0.23.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
 	gopkg.in/ini.v1 v1.67.2 // indirect
 )

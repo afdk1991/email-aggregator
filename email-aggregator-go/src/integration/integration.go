@@ -28,17 +28,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
-	kafkago "github.com/segmentio/kafka-go"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/opensearch-project/opensearch-go/v2"
+	kafkago "github.com/segmentio/kafka-go"
 
 	"email-aggregator-go/src/events"
 	"email-aggregator-go/src/model"
@@ -54,16 +57,19 @@ import (
 
 // Config 真实基础设施连接配置（通常由环境变量注入）。
 type Config struct {
-	PGDSN          string // postgres://user:pass@host:5432/db
-	ObjectEndpoint string // MinIO/S3 endpoint，如 localhost:9000
-	ObjectBucket   string
+	PGDSN           string // postgres://user:pass@host:5432/db
+	ObjectEndpoint  string // MinIO/S3 endpoint，如 localhost:9000
+	ObjectBucket    string
 	ObjectAccessKey string
 	ObjectSecretKey string
-	ObjectSecure    bool // 是否 HTTPS
+	ObjectSecure    bool   // 是否 HTTPS
 	OpenSearchAddr  string // http://localhost:9200
 	OpenSearchUser  string // OpenSearch 安全插件启用时需基础鉴权（如 admin）
 	OpenSearchPass  string
-	KafkaBrokers   []string
+	KafkaBrokers    []string
+	// KafkaDialAddr 可选拨号重写目标（如 "127.0.0.1:9092"）：broker advertised 通告容器名/内网名、
+	// 而本进程在宿主机/跨网络无法解析时使用（生产级能力，同 Kafka e2e WithDial 机制）。
+	KafkaDialAddr string
 }
 
 // RealAdapters 装配后的真实适配器集合（接口形态与 InMemory 版一致）。
@@ -97,8 +103,16 @@ func Wire(ctx context.Context, cfg Config) (*RealAdapters, error) {
 		return nil, fmt.Errorf("opensearch: %w", err)
 	}
 	hub := NewWsHub()
+	kafkaBus := NewKafkaAdapter(cfg.KafkaBrokers)
+	if cfg.KafkaDialAddr != "" {
+		// advertised 通告容器名而本进程在宿主机无法解析时，把任意目标地址重写为宿主可达地址（生产级能力）。
+		dialTarget := cfg.KafkaDialAddr
+		kafkaBus = kafkaBus.WithDial(func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, dialTarget)
+		})
+	}
 	return &RealAdapters{
-		Bus:      NewKafkaAdapter(cfg.KafkaBrokers),
+		Bus:      kafkaBus,
 		Metadata: pg,
 		Cursor:   pg,
 		Content:  obj,
@@ -139,7 +153,7 @@ func (s *PgMetadataStore) UpsertMail(tenantID string, m model.CanonicalMail) err
 		INSERT INTO mail_metadata
 		  (id, tenant_id, account_id, provider, folder, subject, from_addr, body_text, internal_date, size_bytes, raw_object_key, cursor_json, read)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		ON CONFLICT (id) DO NOTHING`,
+		ON CONFLICT (id) DO UPDATE SET subject = EXCLUDED.subject, read = EXCLUDED.read`,
 		m.ID, tenantID, m.AccountID, string(m.Provider), m.Folder, m.Subject,
 		m.From.Email, m.BodyText, m.InternalDate, m.SizeBytes, m.RawObjectKey, cursorJSON(m.Cursor), m.Read)
 	return err
@@ -495,12 +509,12 @@ func truncateStr(s string, n int) string {
 
 // KafkaAdapter 真实 Kafka 适配器：生产者用 Writer，消费者按 group 起 Reader。
 type KafkaAdapter struct {
-	writer    *kafkago.Writer
-	brokers   []string
-	mu        sync.Mutex
-	readers   map[string]*kafkago.Reader
-	retryCfg  events.RetryConfig // 演进：有界重试（默认 3 次/200ms 起/封顶 2s）
-	dlqEnabled bool              // 演进：最终失败转 <topic>-dlq
+	writer     *kafkago.Writer
+	brokers    []string
+	mu         sync.Mutex
+	readers    map[string]*kafkago.Reader
+	retryCfg   events.RetryConfig                                                   // 演进：有界重试（默认 3 次/200ms 起/封顶 2s）
+	dlqEnabled bool                                                                 // 演进：最终失败转 <topic>-dlq
 	dialFunc   func(ctx context.Context, network, address string) (net.Conn, error) // 可选拨号重写（advertised 与客户端网络不一致时）
 }
 
@@ -516,6 +530,15 @@ func NewKafkaAdapter(brokers []string) *KafkaAdapter {
 	// 覆盖场景：broker advertised 通告容器名/内网名，而客户端在宿主机/跨网络。
 	k.writer = &kafkago.Writer{
 		Addr: kafkago.TCP(brokers...),
+		// 吞吐优先：Async 入队即返（fetch 不被逐封生产阻塞），writer 后台批量聚合发送；
+		// RequiredAcks=RequireOne（leader 确认）+ kafka-go 内部重试保证 at-least-once，
+		// 最终失败经 Errors() 由 drainErrors 排空打日志，不静默丢失。
+		// 实测：单机 broker 同步生产 ~1s/封；Async 后 fetch 不阻塞。
+		Async:        true,
+		RequiredAcks: kafkago.RequireOne,
+		BatchTimeout: 50 * time.Millisecond,
+		// 该版本 kafka-go (v0.4.47) 无 Errors() 方法：Async 发送失败经 ErrorLogger 上报，避免静默丢失。
+		ErrorLogger: log.New(os.Stderr, "[kafka] ", 0),
 		Transport: &kafkago.Transport{Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			if k.dialFunc != nil {
 				return k.dialFunc(ctx, network, address)

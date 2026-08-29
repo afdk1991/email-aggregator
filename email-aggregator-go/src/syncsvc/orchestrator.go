@@ -18,9 +18,10 @@ type OrchestratorDeps struct {
 	Bus          events.EventBus
 	Vault        *security.CredentialVault
 	BackoffMaxMs int
-	Connector    model.Connector   // 协议适配器（IMAP/POP3/Exchange/Gmail）
-	Credential   model.Credential  // 连接凭据（运行时内存态；生产环境由 Vault 解密注入）
-	Accounts     store.AccountStore // 可选：连接/账户服务（未挂载则不做状态门控，向后兼容）
+	Connector    model.Connector    // 协议适配器（IMAP/POP3/Exchange/Gmail）
+	Credential   model.Credential   // 连接凭据（运行时内存态；生产环境由 Vault 解密注入）
+	Accounts     store.AccountStore  // 可选：连接/账户服务（未挂载则不做状态门控，向后兼容）
+	Cursor       store.CursorStore   // 可选：同步游标持久化（未挂载则游标仅内存，重启需重新全量）
 }
 
 // Orchestrator 同步编排器：消费 sync-tasks，推进状态机，驱动 Connector 采集，发布 mail-ingested
@@ -49,13 +50,15 @@ func (o *Orchestrator) State() SyncState { return o.state }
 // 采集回传每封邮件强制盖上租户归属，确保下游 store/index/notify 的隔离边界
 // 不依赖 Connector 是否填充 TenantID（协议适配层无租户语义）。
 type busSink struct {
-	bus       events.EventBus
-	tenantID  string // ADR-009：绑定租户，回传邮件强制归属
-	accountID string
+	bus         events.EventBus
+	tenantID    string // ADR-009：绑定租户，回传邮件强制归属
+	accountID   string
+	folder      string
+	maxLastUID  uint32 // 本轮同步见过的最高 LastUID，用于游标持久化
 }
 
 func newBusSink(bus events.EventBus, tenantID, accountID string) *busSink {
-	return &busSink{bus: bus, tenantID: tenant.Resolve(tenantID), accountID: accountID}
+	return &busSink{bus: bus, tenantID: tenant.Resolve(tenantID), accountID: accountID, folder: "INBOX"}
 }
 
 // OnMessage 收到一封邮件 → 盖租户戳 → 构造 mail-ingested 事件 → 总线发布
@@ -64,12 +67,20 @@ func (s *busSink) OnMessage(ctx context.Context, m model.CanonicalMail) error {
 	// 强制盖租户戳：Connector 无租户语义，sink 是数据面隔离的入口
 	m.TenantID = s.tenantID
 	m.AccountID = s.accountID
+	if m.Cursor.LastUID > s.maxLastUID {
+		s.maxLastUID = m.Cursor.LastUID
+	}
 
 	key, payload, err := buildMailIngested(m)
 	if err != nil {
 		return fmt.Errorf("build mail-ingested: %w", err)
 	}
 	return s.bus.Publish(ctx, events.TopicMailIngested, key, payload)
+}
+
+// cursor 返回本轮同步捕获到的最高 LastUID（0 表示未见任何邮件）。
+func (s *busSink) cursor() model.SyncCursor {
+	return model.SyncCursor{LastUID: s.maxLastUID}
 }
 
 // OnDelete 收到删除通知（当前仅日志，后续可扩展为 delete 事件）
@@ -157,7 +168,12 @@ func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskE
 			return fmt.Errorf("state transition INITIAL_FULL→INCREMENTAL: %w", err)
 		}
 		o.state = next
-		// 增量采集
+		// 增量采集：任务未携带游标时从游标存储读取（持久化游标，重启后免全量重拉）
+		if o.deps.Cursor != nil && task.Cursor.LastUID == 0 {
+			if c, cerr := o.deps.Cursor.GetCursor(tenant.Resolve(task.TenantID), task.AccountID, "INBOX"); cerr == nil {
+				task.Cursor = c
+			}
+		}
 		if o.deps.Connector != nil {
 			if err := o.deps.Connector.IncrementalSync(ctx, task.Cursor, sink); err != nil {
 				o.transitionError()
@@ -168,6 +184,13 @@ func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskE
 
 	fmt.Printf("[orchestrator] tenant=%s account=%s mode=%s -> state=%s\n",
 		tenant.Resolve(task.TenantID), task.AccountID, task.Mode, o.state)
+
+	// 同步成功后持久化同步游标（连接/账户/游标服务，未挂载则跳过；游标为空表示无邮件，不覆盖旧游标）
+	if o.deps.Cursor != nil && sink.maxLastUID > 0 {
+		if err := o.deps.Cursor.PutCursor(tenant.Resolve(task.TenantID), task.AccountID, "INBOX", sink.cursor()); err != nil {
+			fmt.Printf("[orchestrator] put cursor failed (account=%s): %v\n", task.AccountID, err)
+		}
+	}
 
 	// 同步成功后回写账户最近同步时间（连接/账户服务，未挂载则跳过）
 	if o.deps.Accounts != nil {
@@ -216,6 +239,7 @@ func buildMailIngested(m model.CanonicalMail) (string, []byte, error) {
 		RawObjectKey:  m.RawObjectKey,
 		SizeBytes:     m.SizeBytes,
 		HasAttachment: m.HasAttachment,
+		Read:          m.Read,
 	}
 	payload, err := json.Marshal(ev)
 	if err != nil {

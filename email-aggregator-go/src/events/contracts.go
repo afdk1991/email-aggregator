@@ -42,6 +42,7 @@ type MailIngestedEvent struct {
 	RawObjectKey string `json:"rawObjectKey,omitempty"`
 	SizeBytes    int64  `json:"sizeBytes"`
 	HasAttachment bool  `json:"hasAttachment"`
+	Read         bool   `json:"read"`
 }
 
 // MailIndexEvent 索引就绪

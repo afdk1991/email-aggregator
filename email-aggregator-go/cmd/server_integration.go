@@ -68,6 +68,8 @@ func main() {
 		OpenSearchUser:  env("OPENSEARCH_USER", "admin"),
 		OpenSearchPass:  env("OPENSEARCH_PASS", "Kp3mQ9@vL2*rT7xA8"),
 		KafkaBrokers:    []string{env("KAFKA_BROKERS", "kafka:9092")},
+		// 可选拨号重写：broker advertised 通告容器名而本进程在宿主机无法解析时，指向宿主可达地址。
+		KafkaDialAddr:    env("KAFKA_DIAL_ADDR", ""),
 	}
 	// 敏感凭据经保险库解析：若 OPENSEARCH_PASS / MINIO_SECRET_KEY 为信封加密 JSON 则拆封，
 	// 否则按明文使用（向后兼容 PoC）。明文仅在进程内存短暂存在、零落盘。
@@ -129,7 +131,7 @@ func main() {
 	}
 
 	// 账户真实同步执行器：手动「立即同步」走 连接器注册表 + Vault 拆封凭据 + 编排器。
-	syncer := newAccountSyncer(adapters.Bus, vault, adapters.Accounts, connector.NewDefaultRegistry())
+	syncer := newAccountSyncer(adapters.Bus, vault, adapters.Accounts, adapters.Metadata, connector.NewDefaultRegistry())
 
 	// REST + WS 同端口（含 AI 网关 /api/ai/chat、账户服务 /api/accounts、凭据/同步入口）
 	mux := http.NewServeMux()

@@ -128,12 +128,51 @@ func (c *RealIMAPConnector) Connect(ctx context.Context, cred model.Credential) 
 // Capabilities 返回能力声明
 func (c *RealIMAPConnector) Capabilities() model.ConnectorCapabilities { return c.cap }
 
-// InitialFullSync 初始全量：SELECT INBOX 后 UID FETCH 1:*，按 since 过滤经 sink 回传。
+// InitialFullSync 初始全量：SELECT INBOX 后按序列号分批拉取（每批 50）。
+// 规避 139 等服务器对单命令大响应（ENVELOPE+BODYSTRUCTURE）截断在 ~64KB/99 条的问题——
+// 单次 `UID FETCH 1:*` 会被静默截断，导致只同步到前 99 封、丢失其余全部邮件。
 func (c *RealIMAPConnector) InitialFullSync(ctx context.Context, since int64, sink model.SyncSink) error {
-	if _, _, err := c.selectMailbox("INBOX"); err != nil {
+	_, exists, err := c.selectMailbox("INBOX")
+	if err != nil {
 		return err
 	}
-	return c.fetchAndSink(ctx, "1:*", since, sink)
+	if exists <= 0 {
+		return nil
+	}
+	const batch = 50
+	for from := 1; from <= exists; from += batch {
+		to := from + batch - 1
+		if to > exists {
+			to = exists
+		}
+		if err := c.fetchSeqAndSink(ctx, from, to, since, sink); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fetchSeqAndSink 按序列号区间拉取（FETCH from:to，响应含 UID）并过滤 since 后经 sink 回传。
+func (c *RealIMAPConnector) fetchSeqAndSink(ctx context.Context, from, to int, since int64, sink model.SyncSink) error {
+	tag := c.nextTag()
+	resp, err := c.roundtrip(tag, fmt.Sprintf("FETCH %d:%d (%s)", from, to, defaultFetchItems))
+	if err != nil {
+		return err
+	}
+	mails, err := parseFetchResponses(resp)
+	if err != nil {
+		return err
+	}
+	c.finishMails(mails)
+	for _, m := range mails {
+		if since > 0 && m.InternalDate < since {
+			continue
+		}
+		if err := sink.OnMessage(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // IncrementalSync 增量：从 cursor 断点（LastUID+1）继续拉取。
@@ -355,8 +394,11 @@ func (c *RealIMAPConnector) selectMailbox(mb string) (uidValidity uint32, exists
 	}
 	for _, l := range strings.Split(resp, "\n") {
 		if strings.Contains(l, "EXISTS") {
-			if f := strings.Fields(l); len(f) >= 1 {
-				exists, _ = strconv.Atoi(f[0])
+			// 形如 "* 2411 EXISTS"：取 EXISTS 前一个字段。
+			if f := strings.Fields(l); len(f) >= 2 && f[len(f)-1] == "EXISTS" {
+				if n, err := strconv.Atoi(f[len(f)-2]); err == nil {
+					exists = n
+				}
 			}
 		}
 		if i := strings.Index(l, "UIDVALIDITY"); i >= 0 {
@@ -392,6 +434,12 @@ func (c *RealIMAPConnector) uidFetch(set string) ([]model.CanonicalMail, error) 
 	if err != nil {
 		return nil, err
 	}
+	c.finishMails(mails)
+	return mails, nil
+}
+
+// finishMails 统一后处理：补 Provider/Folder/AccountID/ID，并推进游标 lastUID。
+func (c *RealIMAPConnector) finishMails(mails []model.CanonicalMail) {
 	for i := range mails {
 		mails[i].Provider = model.ProviderIMAP
 		mails[i].Folder = "INBOX"
@@ -403,7 +451,6 @@ func (c *RealIMAPConnector) uidFetch(set string) ([]model.CanonicalMail, error) 
 			c.lastUID = mails[i].Cursor.LastUID
 		}
 	}
-	return mails, nil
 }
 
 // quoteIMAP 按 IMAP 规范引用字符串（双引号 + 转义 " 与 \）。
@@ -530,7 +577,7 @@ func parseEnvelope(l []node, m *model.CanonicalMail) {
 		return
 	}
 	m.InternalDate = parseIMAPDate(strOf(l[0]))
-	m.Subject = strOf(l[1])
+	m.Subject = decodeRFC2047(strOf(l[1]))
 	if addrs := parseAddresses(l[2]); len(addrs) > 0 {
 		m.From = addrs[0]
 	}
@@ -564,7 +611,7 @@ func parseOneAddress(n node) model.Address {
 	if host := strOf(n.list[3]); host != "" {
 		email = email + "@" + host
 	}
-	return model.Address{Name: strOf(n.list[0]), Email: email}
+	return model.Address{Name: decodeRFC2047(strOf(n.list[0])), Email: email}
 }
 
 // hasAttachment 递归扫描 BODYSTRUCTURE，发现 "attachment" 处置或 "NAME" 参数即判为带附件。

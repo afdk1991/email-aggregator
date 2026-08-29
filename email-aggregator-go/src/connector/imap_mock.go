@@ -84,11 +84,11 @@ func (s *MockIMAPServer) handle(conn net.Conn) {
 			write("* OK [UIDVALIDITY 1] UIDs valid")
 			write("* FLAGS (\\Seen \\Flagged)")
 			write(tag + " OK [READ-WRITE] SELECT completed")
-		case strings.HasPrefix(cmd, "UID FETCH"):
+		case strings.HasPrefix(cmd, "UID FETCH"), strings.HasPrefix(cmd, "FETCH"):
 			for _, l := range mockFetchResponses() {
 				write(l)
 			}
-			write(tag + " OK UID FETCH completed")
+			write(tag + " OK FETCH completed")
 		case cmd == "IDLE":
 			write("+ idling")
 			done, _ := r.ReadString('\n')

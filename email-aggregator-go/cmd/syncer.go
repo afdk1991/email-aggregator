@@ -27,6 +27,7 @@ type accountSyncer struct {
 	bus      events.EventBus
 	vault    *security.CredentialVault
 	accounts store.AccountStore
+	metadata store.CursorStore // 可选：同步游标持久化（nil 则每次全量）
 	reg      *connector.ConnectorRegistry
 
 	mu       sync.Mutex
@@ -34,9 +35,9 @@ type accountSyncer struct {
 	statuses map[string]api.SyncStatus // key: tenantID\x00accountID
 }
 
-func newAccountSyncer(bus events.EventBus, vault *security.CredentialVault, accts store.AccountStore, reg *connector.ConnectorRegistry) *accountSyncer {
+func newAccountSyncer(bus events.EventBus, vault *security.CredentialVault, accts store.AccountStore, meta store.CursorStore, reg *connector.ConnectorRegistry) *accountSyncer {
 	return &accountSyncer{
-		bus: bus, vault: vault, accounts: accts, reg: reg,
+		bus: bus, vault: vault, accounts: accts, metadata: meta, reg: reg,
 		running:  map[string]bool{},
 		statuses: map[string]api.SyncStatus{},
 	}
@@ -127,16 +128,24 @@ func (s *accountSyncer) run(k string, acct *model.Account) {
 		return
 	}
 
-	// 3) 编排器全量同步 → mail-ingested → 摄取管线（PG/MinIO/OpenSearch/通知）
+	// 3) 编排器同步 → mail-ingested → 摄取管线（PG/MinIO/OpenSearch/通知）
+	// 游标持久化：已有游标 → 增量；无游标 → 初始全量（重启后免重复全量重拉）
+	mode := "initial"
+	if s.metadata != nil {
+		if c, cerr := s.metadata.GetCursor(tid, acct.ID, "INBOX"); cerr == nil && (c.LastUID > 0 || c.HighWaterMark != "" || len(c.ProviderSpecific) > 0) {
+			mode = "incremental"
+		}
+	}
 	orch := syncsvc.NewOrchestrator(syncsvc.OrchestratorDeps{
 		Bus:       s.bus,
 		Vault:     s.vault,
 		Connector: conn,
 		Credential: cred,
 		Accounts:   s.accounts,
+		Cursor:     s.metadata,
 	})
 	if err := orch.HandleSyncTask(ctx, events.SyncTaskEvent{
-		TenantID: tid, AccountID: acct.ID, Mode: "initial",
+		TenantID: tid, AccountID: acct.ID, Mode: mode,
 	}); err != nil {
 		s.fail(k, tid, acct, err.Error())
 		return

@@ -78,6 +78,7 @@ func (w *IngestWorker) handle(ctx context.Context, env events.EventEnvelope) err
 		SizeBytes:    ev.SizeBytes,
 		HasAttachment: ev.HasAttachment,
 		RawObjectKey: ev.RawObjectKey,
+		Read:         ev.Read,
 	}
 
 	// 1) 元数据落库（幂等：同 (tid, ID) 重复摄取不新增）

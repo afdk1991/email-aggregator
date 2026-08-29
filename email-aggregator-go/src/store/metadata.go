@@ -24,6 +24,7 @@ type MetadataStore interface {
 	SetRead(tenantID, accountID, id string, read bool) error
 	DeleteMail(tenantID, accountID, id string) error
 	UnreadCount(tenantID, accountID string) (int, error)
+	CursorStore // 同步游标持久化：重启后增量续拉，避免重复全量
 }
 
 // CursorStore 同步游标持久化（按 tenant+account+folder）
