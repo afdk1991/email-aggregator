@@ -1,0 +1,50 @@
+package connector
+
+import (
+	"testing"
+
+	"email-aggregator-go/src/model"
+)
+
+// TestDefaultRegistry 验证默认注册表能按协议创建三种真实连接器，
+// 并对缺失必填参数 / 未注册协议返回错误（不静默降级）。
+func TestDefaultRegistry(t *testing.T) {
+	reg := NewDefaultRegistry()
+
+	// IMAP 缺 address 应报错
+	if _, err := reg.Create(model.ProviderIMAP, nil); err == nil {
+		t.Fatal("expected error for imap without cfg[\"address\"]")
+	}
+
+	// IMAP 带 address 应成功，且报告 provider=imap
+	c, err := reg.Create(model.ProviderIMAP, map[string]string{"address": "imap.example.com:993", "useTLS": "true"})
+	if err != nil {
+		t.Fatalf("create imap: %v", err)
+	}
+	if c.Capabilities().Provider != model.ProviderIMAP {
+		t.Fatalf("imap provider mismatch: %s", c.Capabilities().Provider)
+	}
+
+	// Gmail 缺 address 走默认 imap.gmail.com:993，且应成功创建（复用 IMAP 适配器）
+	g, err := reg.Create(model.ProviderGmail, nil)
+	if err != nil {
+		t.Fatalf("create gmail: %v", err)
+	}
+	if g == nil {
+		t.Fatal("gmail connector is nil")
+	}
+
+	// Exchange / EWS
+	e, err := reg.Create(model.ProviderExchange, map[string]string{"endpoint": "https://owa.corp.com/EWS/Exchange.asmx"})
+	if err != nil {
+		t.Fatalf("create exchange: %v", err)
+	}
+	if e.Capabilities().Provider != model.ProviderExchange {
+		t.Fatalf("exchange provider mismatch: %s", e.Capabilities().Provider)
+	}
+
+	// 未注册协议（pop3）应报错
+	if _, err := reg.Create(model.ProviderPOP3, nil); err == nil {
+		t.Fatal("expected error for unregistered pop3")
+	}
+}

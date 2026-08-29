@@ -1,0 +1,37 @@
+# ============================================================
+# 项目003 · 邮箱聚合平台 —— 根 .gitignore
+# 策略：忽略构建缓存 / 产物 / 密钥 / 运行时状态；保留源码、文档、示例配置。
+# ============================================================
+
+# ---------- Go 工具链缓存（约 850MB，勿入库） ----------
+.gocache/
+.gopath/
+**/.gocache/
+**/.gopath/
+
+# ---------- Go 构建产物 ----------
+*.exe
+email-agg-server
+**/bin/
+**/release/
+**/webroot/dist/
+*.log
+integ_run*.log
+integ-server.err.log
+integ-webui.err.log
+integ-webui.log
+
+# ---------- Node / 前端 ----------
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# ---------- 密钥与本地配置（保留 .env.example） ----------
+.env
+**/.env
+!**/.env.example
+
+# ---------- Agent / 工作区 / 临时 ----------
+.workbuddy/
+_inbox/

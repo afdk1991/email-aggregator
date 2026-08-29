@@ -1,0 +1,21 @@
+{
+  "name": "email-aggregator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "邮箱聚合平台 Phase 0 PoC —— 单 IMAP 端到端闭环（TypeScript，零外部依赖可运行）",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/main.ts",
+    "integration": "node --experimental-strip-types src/main.integration.ts",
+    "demo": "node --experimental-strip-types src/demo.ts",
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}

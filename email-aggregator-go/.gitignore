@@ -1,0 +1,6 @@
+# 构建产物（由 build.sh / build.ps1 生成，非源码）
+/webroot/dist/
+/release/
+email-agg-server
+*.exe
+*.log

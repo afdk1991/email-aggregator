@@ -1,0 +1,30 @@
+# 邮箱聚合平台 · 前端容器编排
+# 启动: cd email-aggregator-web && docker compose up -d --build
+#
+# 端口约定（本机三项目并存，避免冲突）：
+#   - 前端     : 5173（本容器）
+#   - Go 后端  : 8090（宿主机进程，HTTP_PORT=8090 启动；8080 已被项目002 网关占用）
+name: project003-web
+
+services:
+  web:
+    build: .
+    container_name: project003-web
+    ports:
+      - "5173:5173"
+    environment:
+      # nginx 反代目标：宿主机上的 Go 后端（REST + WebSocket 同端口）
+      API_UPSTREAM: http://host.docker.internal:8090
+    extra_hosts:
+      # Docker Desktop 自带该解析；显式声明以兼容 Linux 引擎
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - deploy_default
+      - project003-web-net
+
+networks:
+  deploy_default:
+    external: true
+  project003-web-net:
+    driver: bridge

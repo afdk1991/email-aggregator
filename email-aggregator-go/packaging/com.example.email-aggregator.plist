@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.email-aggregator</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- 替换为实际放置二进制的路径；Apple Silicon 用 -darwin-arm64，Intel 用 -darwin-amd64 -->
+    <string>/usr/local/opt/email-aggregator/email-aggregator-darwin-arm64</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/usr/local/opt/email-aggregator</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORT</key>
+    <string>8080</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/usr/local/var/log/email-aggregator.log</string>
+  <key>StandardErrorPath</key>
+  <string>/usr/local/var/log/email-aggregator.log</string>
+</dict>
+</plist>

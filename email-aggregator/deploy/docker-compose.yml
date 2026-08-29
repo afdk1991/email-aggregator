@@ -1,0 +1,45 @@
+# email-aggregator (TS) 真实集成栈（PoC demo 无需启动，内存桩即可跑通）。
+# 凭证与端口统一来自同目录 .env（参见仓库根 .env.example）。
+# 启动：cd deploy && docker compose up -d
+services:
+  postgres:
+    image: bitnami/postgresql:16
+    environment:
+      - POSTGRESQL_USERNAME=${PG_USER}
+      - POSTGRESQL_PASSWORD=${PG_PASSWORD}
+      - POSTGRESQL_DATABASE=${PG_DATABASE}
+    ports: ["${PG_PORT}:5432"]
+    volumes: ["pgdata:/bitnami/postgresql"]
+
+  pgbouncer:
+    image: bitnami/pgbouncer:1.22
+    environment:
+      - PGBOUNCER_POOL_MODE=transaction
+    ports: ["${PGBOUNCER_PORT}:6432"]
+    depends_on: [postgres]
+
+  minio:
+    image: bitnami/minio:latest
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    ports: ["${MINIO_PORT}:9000", "${MINIO_CONSOLE_PORT}:9001"]
+    volumes: ["miniodata:/bitnami/minio"]
+
+  opensearch:
+    image: bitnami/opensearch:2
+    environment:
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+      - discovery.type=single-node
+    ports: ["${OPENSEARCH_PORT}:9200"]
+    volumes: ["osdata:/bitnami/opensearch"]
+
+  redpanda:
+    image: redpandadata/redpanda:latest
+    command: ["redpanda", "start", "--smp", "1", "--overprovisioned", "--kafka-addr", "PLAINTEXT://0.0.0.0:9092", "--advertise-kafka-addr", "PLAINTEXT://localhost:9092"]
+    ports: ["${KAFKA_PORT}:9092"]
+
+volumes:
+  pgdata:
+  miniodata:
+  osdata:

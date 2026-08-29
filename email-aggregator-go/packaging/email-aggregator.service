@@ -1,0 +1,19 @@
+[Unit]
+Description=Email Aggregator (self-contained binary)
+After=network.target
+
+[Service]
+Type=simple
+# 将下面路径替换为你实际放置二进制的位置
+WorkingDirectory=/opt/email-aggregator
+ExecStart=/opt/email-aggregator/email-aggregator-linux-amd64
+Restart=on-failure
+RestartSec=3
+# 可选：监听端口（二进制默认 :8080）
+Environment=PORT=8080
+# 生产建议以非 root 用户运行
+User=emailagg
+Group=emailagg
+
+[Install]
+WantedBy=multi-user.target
