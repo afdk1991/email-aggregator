@@ -16,6 +16,16 @@ const FALLBACK_ACCOUNTS: AccountInfo[] = [
   { id: 'acc_personal', unread: 0 },
 ]
 
+// toast 文案映射：覆盖全部 NotifyKind（new-mail / sync-state / mail-updated /
+// mail-deleted / error），未知 kind 回退显示 kind 本身，避免把正常事件误报成"错误"。
+const TOAST_LABELS: Record<string, string> = {
+  'new-mail': '📬 新邮件',
+  'sync-state': '🔄 同步',
+  'mail-updated': '📩 已读更新',
+  'mail-deleted': '🗑️ 邮件删除',
+  error: '⚠️ 错误',
+}
+
 export default function App() {
   const [accountId, setAccountId] = useState(DEFAULT_ACCOUNT)
   const [accounts, setAccounts] = useState<AccountInfo[]>(FALLBACK_ACCOUNTS)
@@ -285,7 +295,7 @@ export default function App() {
         {toasts.map((t, i) => (
           <div key={`${t.ts}-${i}`} className={`toast toast-${t.kind}`}>
             <strong>
-              {t.kind === 'new-mail' ? '📬 新邮件' : t.kind === 'sync-state' ? '🔄 同步' : '⚠️ 错误'}
+              {TOAST_LABELS[t.kind] ?? t.kind}
             </strong>
             <span>{t.preview || t.accountId}</span>
           </div>

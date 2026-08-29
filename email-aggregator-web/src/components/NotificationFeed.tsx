@@ -7,6 +7,8 @@ interface Props {
 const KIND_LABEL: Record<string, string> = {
   'new-mail': '📬 新邮件',
   'sync-state': '🔄 同步',
+  'mail-updated': '📩 已读更新',
+  'mail-deleted': '🗑️ 邮件删除',
   error: '⚠️ 错误',
 }
 
