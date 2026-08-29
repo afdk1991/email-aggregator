@@ -35,3 +35,6 @@ dist/
 # ---------- Agent / 工作区 / 临时 ----------
 .workbuddy/
 _inbox/
+.ci-logs/
+ts-integ.log
+ts-integ.err.log

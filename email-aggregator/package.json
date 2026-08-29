@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "邮箱聚合平台 Phase 0 PoC —— 单 IMAP 端到端闭环（TypeScript，零外部依赖可运行）",
+  "description": "邮箱聚合平台 Phase 0 PoC —— 单 IMAP 端到端闭环（TypeScript；demo/main 零外部依赖可运行，真实集成按需安装 pg/minio/kafkajs/undici）",
   "engines": {
     "node": ">=22.6"
   },
@@ -15,7 +15,13 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "minio": "^8.0.7",
+    "pg": "^8.23.0",
+    "undici": "^7.29.0"
   }
 }

@@ -36,6 +36,7 @@ import type { Notifier, NotificationPayload, PushSink } from "../notify/ws.ts";
 import { WsNotifier } from "../notify/ws.ts";
 import { Resolve } from "../tenant/tenant.ts";
 import { createHash } from "node:crypto";
+import { Agent as UndiciAgent } from "undici";
 
 // ───────────────────────────────────────────────────────────────────────────
 // 配置
@@ -74,16 +75,16 @@ export function fromAppConfig(
   overrides: Partial<IntegrationConfig> = {},
 ): IntegrationConfig {
   return {
-    pgDsn: app.pgDsn,
-    objectEndpoint: app.minioEndpoint,
+    pgDsn: overrides.pgDsn ?? app.pgDsn,
+    objectEndpoint: overrides.objectEndpoint ?? app.minioEndpoint,
     objectBucket: overrides.objectBucket ?? "mail-content",
     objectAccessKey: overrides.objectAccessKey ?? "minioadmin",
     objectSecretKey: overrides.objectSecretKey ?? "minioadmin",
     objectSecure: overrides.objectSecure ?? app.minioEndpoint.startsWith("https"),
-    openSearchAddr: app.opensearchUrl,
+    openSearchAddr: overrides.openSearchAddr ?? app.opensearchUrl,
     openSearchUser: overrides.openSearchUser ?? "admin",
     openSearchPass: overrides.openSearchPass ?? "admin",
-    kafkaBrokers: app.kafkaBrokers,
+    kafkaBrokers: overrides.kafkaBrokers ?? app.kafkaBrokers,
     kmsEndpoint: overrides.kmsEndpoint,
   };
 }
@@ -430,6 +431,8 @@ function sha256Hex(buf: Buffer): string {
 export class OpenSearchIndex implements SearchIndex {
   private addr: string;
   private auth: string;
+  /** https 且为自签证书（dev/PoC）时用于跳过 TLS 校验的 undici dispatcher；生产用受信 CA 则保持 undefined */
+  private dispatcher?: UndiciAgent;
 
   private constructor(addr: string, user: string, pass: string) {
     this.addr = addr.replace(/\/$/, "");
@@ -439,6 +442,11 @@ export class OpenSearchIndex implements SearchIndex {
   static async create(addr: string, user: string, pass: string): Promise<OpenSearchIndex> {
     // 连通性探测（不致命：失败仅 warn，真实写入时再报错）
     const inst = new OpenSearchIndex(addr, user, pass);
+    // 开发/PoC：OpenSearch 镜像默认在 REST 端口启用自签 TLS，故 https 地址下跳过证书校验
+    // （对齐 Go integration.go 的 InsecureSkipVerify；生产应使用受信 CA，此时 dispatcher 保持 undefined）
+    if (inst.addr.startsWith("https")) {
+      inst.dispatcher = new UndiciAgent({ connect: { rejectUnauthorized: false } });
+    }
     try {
       const ok = await inst.ping();
       if (!ok) console.warn(`[OpenSearchIndex] ping failed: ${addr}（继续装配，首次写入时会重试）`);
@@ -448,9 +456,20 @@ export class OpenSearchIndex implements SearchIndex {
     return inst;
   }
 
+  /** 统一请求入口：https 自签时注入跳过 TLS 校验的 dispatcher */
+  private async req(path: string, init: RequestInit = {}): Promise<Response> {
+    const options: RequestInit = { ...init };
+    if (this.dispatcher) {
+      // undici 包自带类型与 @types/node 的 undici-types 不同源（运行时兼容），此处做类型放宽
+      (options as unknown as { dispatcher: unknown }).dispatcher = this.dispatcher;
+    }
+    return fetch(`${this.addr}${path}`, options);
+  }
+
   private async ping(): Promise<boolean> {
     try {
-      const r = await fetch(`${this.addr}/_cluster/health`);
+      // OpenSearch 安全插件对所有端点（含 _cluster/health）要求基础鉴权，否则 401
+      const r = await this.req("/_cluster/health", { headers: this.headers() });
       return r.ok;
     } catch {
       return false;
@@ -474,7 +493,7 @@ export class OpenSearchIndex implements SearchIndex {
       internalDate: mail.internalDate,
     };
     const idx = this.indexName(tid);
-    const r = await fetch(`${this.addr}/${idx}/_doc/${encodeURIComponent(mail.idempotencyKey)}`, {
+    const r = await this.req(`/${idx}/_doc/${encodeURIComponent(mail.idempotencyKey)}`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(doc),
@@ -483,7 +502,7 @@ export class OpenSearchIndex implements SearchIndex {
       // 索引不存在时自动创建（PoC：无 index template）
       if (r.status === 404) {
         await this.ensureIndex(idx);
-        const r2 = await fetch(`${this.addr}/${idx}/_doc/${encodeURIComponent(mail.idempotencyKey)}`, {
+        const r2 = await this.req(`/${idx}/_doc/${encodeURIComponent(mail.idempotencyKey)}`, {
           method: "POST", headers: this.headers(), body: JSON.stringify(doc),
         });
         if (!r2.ok) throw new Error(`opensearch index(2): ${r2.status} ${await r2.text()}`);
@@ -508,7 +527,7 @@ export class OpenSearchIndex implements SearchIndex {
       },
       sort: [{ internalDate: "desc" }],
     };
-    const r = await fetch(`${this.addr}/${idx}/_search`, {
+    const r = await this.req(`/${idx}/_search`, {
       method: "POST", headers: this.headers(), body: JSON.stringify(body),
     });
     if (!r.ok) {
@@ -532,7 +551,7 @@ export class OpenSearchIndex implements SearchIndex {
   }
 
   private async ensureIndex(idx: string): Promise<void> {
-    const r = await fetch(`${this.addr}/${idx}`, { method: "PUT", headers: this.headers() });
+    const r = await this.req(`/${idx}`, { method: "PUT", headers: this.headers() });
     if (!r.ok && r.status !== 400) {
       // 400 = 已存在；其他状态码视为成功（PoC 宽容策略）
     }
