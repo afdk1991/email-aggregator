@@ -80,5 +80,6 @@ type EventEnvelope struct {
 	Topic   string `json:"topic"`
 	Key     string `json:"key"` // 幂等去重键（如 tenantId:accountId:mailId）
 	TS      int64  `json:"ts"`
-	Payload []byte `json:"payload"` // 序列化事件体（JSON）
+	Type    string `json:"type,omitempty"` // 事件类型名（TypeOfTopic 推导，类型化信封演进，ADR-002）
+	Payload []byte `json:"payload"`        // 序列化事件体（JSON）
 }

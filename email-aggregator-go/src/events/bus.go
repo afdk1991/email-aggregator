@@ -24,7 +24,7 @@ func NewInMemoryBus() *InMemoryBus {
 
 // Publish 同步 fan-out 给订阅者（演示用；生产由 Kafka 分区保证顺序与重放）
 func (b *InMemoryBus) Publish(ctx context.Context, topic, key string, payload []byte) error {
-	env := EventEnvelope{Topic: topic, Key: key, TS: time.Now().UnixMilli(), Payload: payload}
+	env := EventEnvelope{Topic: topic, Key: key, TS: time.Now().UnixMilli(), Type: TypeOfTopic(topic), Payload: payload}
 	for _, h := range b.subs[topic] {
 		if err := h(ctx, env); err != nil {
 			return err

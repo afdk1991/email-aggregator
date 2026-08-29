@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -494,19 +495,48 @@ func truncateStr(s string, n int) string {
 
 // KafkaAdapter 真实 Kafka 适配器：生产者用 Writer，消费者按 group 起 Reader。
 type KafkaAdapter struct {
-	writer  *kafkago.Writer
-	brokers []string
-	mu      sync.Mutex
-	readers map[string]*kafkago.Reader
+	writer    *kafkago.Writer
+	brokers   []string
+	mu        sync.Mutex
+	readers   map[string]*kafkago.Reader
+	retryCfg  events.RetryConfig // 演进：有界重试（默认 3 次/200ms 起/封顶 2s）
+	dlqEnabled bool              // 演进：最终失败转 <topic>-dlq
+	dialFunc   func(ctx context.Context, network, address string) (net.Conn, error) // 可选拨号重写（advertised 与客户端网络不一致时）
 }
 
 // NewKafkaAdapter 构造（brokers 形如 []string{"localhost:9092"}）。
 func NewKafkaAdapter(brokers []string) *KafkaAdapter {
-	return &KafkaAdapter{
-		writer:  &kafkago.Writer{Addr: kafkago.TCP(brokers...)},
-		brokers: brokers,
-		readers: map[string]*kafkago.Reader{},
+	k := &KafkaAdapter{
+		brokers:    brokers,
+		readers:    map[string]*kafkago.Reader{},
+		retryCfg:   events.DefaultRetryConfig,
+		dlqEnabled: true,
 	}
+	// 统一拨号通路：dialFunc 非空时重写目标地址；否则回退系统默认 net.Dialer。
+	// 覆盖场景：broker advertised 通告容器名/内网名，而客户端在宿主机/跨网络。
+	k.writer = &kafkago.Writer{
+		Addr: kafkago.TCP(brokers...),
+		Transport: &kafkago.Transport{Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if k.dialFunc != nil {
+				return k.dialFunc(ctx, network, address)
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		}},
+	}
+	return k
+}
+
+// WithRetry 覆盖重试配置（演进：调用方可调优退避/次数）。
+func (k *KafkaAdapter) WithRetry(cfg events.RetryConfig) *KafkaAdapter {
+	k.retryCfg = cfg
+	return k
+}
+
+// WithDial 覆盖拨号函数（可选）：broker 通告地址与客户端可达网络不一致时
+// （如 docker 容器名），可把任意目标地址重写为宿主机可达地址。nil 时用默认 net.Dialer。
+func (k *KafkaAdapter) WithDial(fn func(ctx context.Context, network, address string) (net.Conn, error)) *KafkaAdapter {
+	k.dialFunc = fn
+	return k
 }
 
 // Publish 投递事件（topic 由参数指定；生产建议按 key 分区保证同账户有序）。
@@ -524,6 +554,12 @@ func (k *KafkaAdapter) Subscribe(ctx context.Context, topic, group string, handl
 		Brokers: k.brokers,
 		Topic:   topic,
 		GroupID: group,
+		Dialer: &kafkago.Dialer{DialFunc: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if k.dialFunc != nil {
+				return k.dialFunc(ctx, network, address)
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		}},
 	})
 	k.mu.Lock()
 	k.readers[topic+":"+group] = r
@@ -541,12 +577,36 @@ func (k *KafkaAdapter) Subscribe(ctx context.Context, topic, group string, handl
 				Topic:   m.Topic,
 				Key:     string(m.Key),
 				TS:      m.Time.UnixMilli(),
+				Type:    events.TypeOfTopic(m.Topic),
 				Payload: m.Value,
 			}
-			_ = handler(ctx, env) // 消费端自行幂等（以 env.Key 去重）
+			// 演进：有界重试（指数退避）→ 最终失败转 DLQ，避免毒丸消息阻塞消费组；
+			// 消费端自行以 env.Key 幂等（可包 events.WithIdempotency 包装器）。
+			if err := events.Retry(ctx, k.retryCfg, func() error { return handler(ctx, env) }); err != nil {
+				k.dlq(ctx, topic, env, err)
+			}
 		}
 	}()
 	return nil
+}
+
+// dlq 把处理失败的事件转投 <topic>-dlq（值为信封 JSON，携带原始 payload 供重放/审计）。
+func (k *KafkaAdapter) dlq(ctx context.Context, topic string, env events.EventEnvelope, cause error) {
+	if !k.dlqEnabled {
+		fmt.Printf("[kafka] %s key=%s dropped after retries: %v\n", topic, env.Key, cause)
+		return
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		fmt.Printf("[kafka] dlq marshal %s key=%s: %v\n", topic, env.Key, err)
+		return
+	}
+	dlqTopic := events.TopicDLQ(topic)
+	if err := k.writer.WriteMessages(ctx, kafkago.Message{Topic: dlqTopic, Key: []byte(env.Key), Value: raw}); err != nil {
+		fmt.Printf("[kafka] dlq write %s key=%s: %v (orig: %v)\n", dlqTopic, env.Key, err, cause)
+		return
+	}
+	fmt.Printf("[kafka] dlq %s -> %s key=%s cause=%v\n", topic, dlqTopic, env.Key, cause)
 }
 
 // Close 释放生产/消费者。
