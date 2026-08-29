@@ -22,7 +22,7 @@ export interface SyncCursor {
   providerSpecific?: Record<string, string>
 }
 
-export type Provider = 'imap' | 'pop3' | 'exchange' | 'gmail' | 'enterprise'
+export type Provider = 'imap' | 'pop3' | 'exchange' | 'gmail' | 'graph' | 'enterprise'
 
 export interface CanonicalMail {
   id: string

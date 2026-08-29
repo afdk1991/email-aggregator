@@ -10,6 +10,7 @@ const (
 	ProviderPOP3       Provider = "pop3"
 	ProviderExchange   Provider = "exchange"
 	ProviderGmail      Provider = "gmail"
+	ProviderGraph      Provider = "graph" // Microsoft Graph（Exchange Online / 365 官方 API，EWS 的现代替代）
 	ProviderEnterprise Provider = "enterprise"
 )
 

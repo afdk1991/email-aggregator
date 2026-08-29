@@ -40,6 +40,12 @@ func NewDefaultRegistry() *ConnectorRegistry {
 		return NewEWSConnector(cfg["endpoint"]), nil
 	})
 
+	// Exchange/Graph 增强：Exchange Online / Microsoft 365 走官方 Graph API（现代增量 delta），
+	// 与 EWS（本地 Exchange on-prem）双模并存；endpoint 缺省走生产 graph.microsoft.com/v1.0。
+	reg.Register(model.ProviderGraph, func(_ model.Provider, cfg map[string]string) (model.Connector, error) {
+		return NewRealGraphConnector(cfg["endpoint"]), nil
+	})
+
 	reg.Register(model.ProviderPOP3, func(_ model.Provider, cfg map[string]string) (model.Connector, error) {
 		addr := cfg["address"]
 		if addr == "" {

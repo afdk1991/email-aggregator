@@ -112,6 +112,7 @@ func main() {
 		{ID: "acc_demo", Provider: model.ProviderIMAP, Email: "demo@example.com", DisplayName: "Demo IMAP", Status: model.AccountActive, SyncFolder: "INBOX"},
 		{ID: "acc_kafka", Provider: model.ProviderIMAP, Email: "kafka@example.com", DisplayName: "Kafka Pipeline", Status: model.AccountActive, SyncFolder: "INBOX"},
 		{ID: "acc_ts", Provider: model.ProviderIMAP, Email: "ts@example.com", DisplayName: "TS Contract", Status: model.AccountActive, SyncFolder: "INBOX"},
+		{ID: "acc_graph", Provider: model.ProviderGraph, Email: "graph@m365.example.com", DisplayName: "M365 Graph", Status: model.AccountActive, SyncFolder: "INBOX"},
 	}
 	for _, a := range seedAccounts {
 		if err := adapters.Accounts.Upsert(tenant.Resolve("default"), a); err != nil {

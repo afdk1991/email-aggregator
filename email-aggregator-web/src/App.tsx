@@ -408,7 +408,8 @@ export default function App() {
             <option value="imap">IMAP</option>
             <option value="pop3">POP3</option>
             <option value="gmail">Gmail</option>
-            <option value="exchange">Exchange</option>
+            <option value="exchange">Exchange (EWS)</option>
+            <option value="graph">Microsoft 365 (Graph)</option>
           </select>
           <input
             placeholder="邮箱（如 user@example.com）"
