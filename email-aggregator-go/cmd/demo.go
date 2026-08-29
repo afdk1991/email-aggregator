@@ -151,5 +151,57 @@ func main() {
 		}
 	}
 
+	// 10) POP3 真实适配器端到端（RFC 1939，进程内 mock POP3 服务端 + 注册表创建）
+	//     走与 IMAP 相同的「编排器 → 事件总线 → IngestWorker → 落库/索引/推送」管线。
+	fmt.Println("\n-- POP3 connector end-to-end --")
+	pop3Srv, pop3Stop, err := connector.StartMockPOP3()
+	if err != nil {
+		panic(err)
+	}
+	defer pop3Stop()
+	pop3, err := connector.NewDefaultRegistry().Create(model.ProviderPOP3, map[string]string{"address": pop3Srv.Addr()})
+	if err != nil {
+		panic(err)
+	}
+	if err := pop3.Connect(ctx, model.Credential{Type: "password", Username: "alice@example.com", Password: "pw"}); err != nil {
+		panic(err)
+	}
+	defer func() { _ = pop3.Close() }()
+
+	busP3 := events.NewInMemoryBus()
+	metaP3 := store.NewInMemoryMetadataStore()
+	contentP3 := store.NewInMemoryContentStore()
+	indexP3 := search.NewInMemorySearchIndex()
+	notifP3 := notify.NewInMemoryNotifier()
+	notifP3.AddSink("acc_pop3", notify.NewFuncSink(func(p notify.NotificationPayload) {
+		fmt.Printf("  [pop3:ws-push] tenant=%s new-mail account=%s preview=%q\n", p.TenantID, p.AccountID, p.Preview)
+	}))
+	workerP3 := ingest.NewIngestWorker(busP3, metaP3, contentP3, indexP3, notifP3)
+	if err := workerP3.Start(ctx); err != nil {
+		panic(err)
+	}
+	orchP3 := syncsvc.NewOrchestrator(syncsvc.OrchestratorDeps{
+		Bus:        busP3,
+		Vault:      vault,
+		Connector:  pop3,
+		Credential: model.Credential{Type: "password", Username: "alice@example.com", Password: "pw"},
+	})
+	if err := orchP3.HandleSyncTask(ctx, events.SyncTaskEvent{
+		TenantID:  demoTenant, // ADR-009：POP3 采集同样强制租户透传
+		AccountID: "acc_pop3",
+		Mode:      "initial",
+	}); err != nil {
+		panic(err)
+	}
+	tidP3 := tenant.Resolve(demoTenant)
+	hitsP3, _ := indexP3.Search(tidP3, "acc_pop3", "邮件正文", 10)
+	fmt.Printf("[pop3:search] tenant=%s query=邮件正文 -> %d hit(s)\n", tidP3, len(hitsP3))
+	for _, h := range hitsP3 {
+		fmt.Printf("             - %s | %s | %s\n", h.ID, h.From, h.Subject)
+	}
+	nP3, _ := metaP3.Count(tidP3, "acc_pop3")
+	fmt.Printf("[pop3:store] tenant=%s total mails in metadata = %d\n", tidP3, nP3)
+	fmt.Println("POP3 connector e2e DONE")
+
 	fmt.Println("demo DONE")
 }

@@ -43,8 +43,22 @@ func TestDefaultRegistry(t *testing.T) {
 		t.Fatalf("exchange provider mismatch: %s", e.Capabilities().Provider)
 	}
 
-	// 未注册协议（pop3）应报错
+	// POP3 缺 address 应报错（不静默降级）
 	if _, err := reg.Create(model.ProviderPOP3, nil); err == nil {
-		t.Fatal("expected error for unregistered pop3")
+		t.Fatal("expected error for pop3 without cfg[\"address\"]")
+	}
+
+	// POP3 带 address 应成功，且报告 provider=pop3
+	p, err := reg.Create(model.ProviderPOP3, map[string]string{"address": "pop3.example.com:110"})
+	if err != nil {
+		t.Fatalf("create pop3: %v", err)
+	}
+	if p.Capabilities().Provider != model.ProviderPOP3 {
+		t.Fatalf("pop3 provider mismatch: %s", p.Capabilities().Provider)
+	}
+
+	// 未注册协议（enterprise）应报错
+	if _, err := reg.Create(model.ProviderEnterprise, nil); err == nil {
+		t.Fatal("expected error for unregistered enterprise")
 	}
 }

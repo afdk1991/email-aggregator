@@ -141,7 +141,10 @@ export function parseRawMessage(raw: RawMessage): ParsedEnvelope {
     return line ? line.slice(name.length + 1).trim() : "";
   };
   const modSeq = Number(get("X-ModSeq") || "0");
-  const internalDate = raw.internalDate ?? Date.now();
+  const dateRaw = get("Date");
+  const internalDate = dateRaw
+    ? (new Date(dateRaw).getTime() || (raw.internalDate ?? Date.now()))
+    : (raw.internalDate ?? Date.now());
   return {
     messageId: get("Message-ID").replace(/[<>]/g, ""),
     from: get("From"),

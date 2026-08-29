@@ -13,9 +13,10 @@ import (
 //   - imap      → RealIMAPConnector（真实 IMAP，纯标准库实现，零第三方依赖）
 //   - gmail     → 复用 RealIMAPConnector（默认指向 imap.gmail.com:993，cfg["address"] 可覆盖）
 //   - exchange  → EWSConnector（Exchange / EWS，SOAP，纯标准库实现）
+//   - pop3      → RealPOP3Connector（真实 POP3，RFC 1939，纯标准库实现；默认 110 端口可 STLS，995 隐式 TLS 用 useTLS=true）
 //
 // 约定：factory 从 cfg 读取连接参数（address / useTLS / endpoint）。
-// IMAP 必须携带 cfg["address"]，否则报错（避免静默降级到错误的默认主机）。
+// IMAP/POP3 必须携带 cfg["address"]，否则报错（避免静默降级到错误的默认主机）。
 // 未在此注册的协议（如 enterprise）由调用方按需 Register，保持零侵入。
 func NewDefaultRegistry() *ConnectorRegistry {
 	reg := NewConnectorRegistry()
@@ -39,6 +40,14 @@ func NewDefaultRegistry() *ConnectorRegistry {
 
 	reg.Register(model.ProviderExchange, func(_ model.Provider, cfg map[string]string) (model.Connector, error) {
 		return NewEWSConnector(cfg["endpoint"]), nil
+	})
+
+	reg.Register(model.ProviderPOP3, func(_ model.Provider, cfg map[string]string) (model.Connector, error) {
+		addr := cfg["address"]
+		if addr == "" {
+			return nil, fmt.Errorf("pop3 connector requires cfg[\"address\"]")
+		}
+		return NewRealPOP3Connector(addr, cfg["useTLS"] == "true", nil), nil
 	})
 
 	return reg
