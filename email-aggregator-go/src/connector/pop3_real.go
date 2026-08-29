@@ -19,12 +19,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -198,7 +201,8 @@ func (c *RealPOP3Connector) syncRange(ctx context.Context, highWater string, sin
 		return err
 	}
 	maxHW := highWater
-	for seq, uidl := range uidls {
+	for _, seq := range sortedUIDLKeys(uidls) {
+		uidl := uidls[seq]
 		if highWater != "" && uidl <= highWater {
 			continue
 		}
@@ -391,31 +395,147 @@ func pop3Addresses(as []*mail.Address) []model.Address {
 	return out
 }
 
-// pop3Body 提取正文：multipart 取首个 text/plain 子部分，否则取整段 body。
+// pop3Body 提取纯文本正文：multipart 优先首个 text/plain，缺失时回退 text/html 并剥离标签，
+// 避免 HTML-only 邮件（新闻简报/营销信）正文为空；charset 非 UTF-8（GBK/GB2312 等）自动转码。
 func pop3Body(msg *mail.Message, h mail.Header) string {
+	text, html := pop3BodyParts(msg, h)
+	if text != "" {
+		return text
+	}
+	if html != "" {
+		return htmlToText(html)
+	}
+	return ""
+}
+
+// pop3BodyHTML 提取 HTML 正文（multipart 中的首个 text/html 子部分，未找到返回 ""）。
+func pop3BodyHTML(msg *mail.Message, h mail.Header) string {
+	_, html := pop3BodyParts(msg, h)
+	return html
+}
+
+// pop3BodyParts 遍历 multipart 子部分，返回 (text/plain, text/html) 两路正文；
+// 非 multipart 按顶层 Content-Type 取整段。子部分按各自 charset 转码。
+// 注意：内部先整体读入缓冲，调用方只需调用一次（msg.Body 为一次性 reader）。
+func pop3BodyParts(msg *mail.Message, h mail.Header) (string, string) {
+	raw, _ := io.ReadAll(msg.Body)
+	body := bytes.NewReader(raw)
 	ct := h.Get("Content-Type")
 	mt, params, err := mime.ParseMediaType(ct)
 	if err != nil {
 		mt = "text/plain"
 	}
+	text, html := walkBodyParts(body, mt, params, h.Get("Content-Transfer-Encoding"))
+	return text, html
+}
+
+// walkBodyParts 递归提取正文：对 multipart 递归下降（真实邮件常见
+// multipart/mixed > multipart/alternative > (text/plain, text/html) 嵌套），
+// 非 multipart 按顶层 Content-Type 取整段。text/plain 优先，text/html 单独保留，
+// 两者都按各自 charset 转码 + Content-Transfer-Encoding 解码。
+func walkBodyParts(body io.Reader, mt string, params map[string]string, cte string) (string, string) {
 	if strings.HasPrefix(mt, "multipart/") {
-		mr := multipart.NewReader(msg.Body, params["boundary"])
+		mr := multipart.NewReader(body, params["boundary"])
+		var text, html string
 		for {
 			p, err := mr.NextPart()
 			if err != nil {
 				break
 			}
-			pt, _, _ := mime.ParseMediaType(p.Header.Get("Content-Type"))
-			if strings.HasPrefix(pt, "text/plain") {
-				b, _ := io.ReadAll(p)
-				return string(b)
+			pt, pparams, _ := mime.ParseMediaType(p.Header.Get("Content-Type"))
+			pt = strings.ToLower(pt)
+			if strings.HasPrefix(pt, "multipart/") {
+				// 递归下降进入嵌套 multipart
+				t, h2 := walkBodyParts(p, pt, pparams, p.Header.Get("Content-Transfer-Encoding"))
+				if text == "" {
+					text = t
+				}
+				if html == "" {
+					html = h2
+				}
+				continue
+			}
+			b, _ := io.ReadAll(p)
+			b = decodeBodyTransfer(b, p.Header.Get("Content-Transfer-Encoding"))
+			switch {
+			case strings.HasPrefix(pt, "text/plain") && text == "":
+				text = charsetToUTF8(pparams["charset"], string(b))
+			case strings.HasPrefix(pt, "text/html") && html == "":
+				html = charsetToUTF8(pparams["charset"], string(b))
 			}
 		}
-		return ""
+		return text, html
 	}
-	b, _ := io.ReadAll(msg.Body)
+	b, _ := io.ReadAll(body)
+	b = decodeBodyTransfer(b, cte)
+	s := charsetToUTF8(params["charset"], string(b))
+	if strings.HasPrefix(mt, "text/html") {
+		return "", s
+	}
+	return s, ""
+}
+
+// decodeBodyTransfer 按 Content-Transfer-Encoding 解码子部分/整段正文：
+// quoted-printable（=XX 转义，新闻简报/营销信常见）与 base64 两种；
+// 其他/未知编码原样返回。解码失败时回退原始字节，不阻断正文提取。
+func decodeBodyTransfer(b []byte, cte string) []byte {
+	switch strings.ToLower(strings.TrimSpace(cte)) {
+	case "quoted-printable":
+		r := quotedprintable.NewReader(bytes.NewReader(b))
+		out, err := io.ReadAll(r)
+		if err != nil {
+			return b
+		}
+		return out
+	case "base64":
+		out, err := base64.StdEncoding.DecodeString(strings.Map(func(r rune) rune {
+			if r == '\r' || r == '\n' || r == ' ' || r == '\t' {
+				return -1
+			}
+			return r
+		}, string(b)))
+		if err != nil {
+			return b
+		}
+		return out
+	default:
+		return b
+	}
+}
+
+// charsetToUTF8 将非 UTF-8 字符集正文转为 UTF-8（复用 rfc2047.go 的 charsetReader：
+// utf-8/ascii 原样返回，GBK/GB2312/GB18030 转码）。
+func charsetToUTF8(charset, s string) string {
+	if s == "" {
+		return s
+	}
+	r, err := charsetReader(charset, strings.NewReader(s))
+	if err != nil {
+		return s
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return s
+	}
 	return string(b)
 }
+
+// htmlToText 粗略剥离 HTML 标签为可读纯文本（块级换行 + 实体解码 + 空行折叠），
+// 供 HTML-only 邮件兜底为 BodyText。
+func htmlToText(html string) string {
+	s := htmlBlockRE.ReplaceAllString(html, "\n")
+	s = htmlTagRE.ReplaceAllString(s, "")
+	s = htmlEntityRE.Replace(s)
+	s = htmlBlankRE.ReplaceAllString(s, "\n\n")
+	return strings.TrimSpace(s)
+}
+
+var (
+	htmlBlockRE  = regexp.MustCompile(`(?i)<\s*(br|/p|/div|/tr|/li|/table|/h[1-6]|/blockquote)[^>]*>`)
+	htmlTagRE    = regexp.MustCompile(`(?s)<[^>]+>`)
+	htmlBlankRE  = regexp.MustCompile(`\n\s*\n+`)
+	htmlEntityRE = strings.NewReplacer("&nbsp;", " ", "&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'", "&apos;", "'")
+)
 
 func pop3Snippet(body string) string {
 	const max = 200

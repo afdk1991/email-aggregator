@@ -83,6 +83,13 @@ $env:OPENSEARCH_ADDR   = 'https://127.0.0.1:9200'
 $env:OPENSEARCH_USER   = 'admin'
 $env:OPENSEARCH_PASS   = 'Kp3mQ9@vL2*rT7xA8'
 $env:KAFKA_BROKERS     = '127.0.0.1:9092'
+# Kafka advertised 通告容器内网名 deploy-kafka-1，宿主机无法解析 —— 强制拨号回环，否则 mail-ingested 事件生产失败、
+# 摄取 worker 收不到事件导致邮件永不落库（真实联调踩坑：正文一直为空即此因）。
+$env:KAFKA_DIAL_ADDR   = '127.0.0.1:9092'
+# 持久化 KEK（信封加密凭据用）。KMS_KEYRING_FILE 缺省时 newCredentialVault 退回「内存随机 KEK」，
+# 进程重启后即无法拆封历史凭据（cipher: message authentication failed）。
+# NewLocalKmsFromFile 在文件不存在时自动生成初始密钥并落盘，故只需指向固定路径。
+$env:KMS_KEYRING_FILE  = Join-Path $BinDir 'kms-keyring.json'
 $env:HTTP_PORT         = "$Port"
 Start-Process -FilePath $ServerExe `
     -RedirectStandardOutput (Join-Path $BinDir 'integ-webui.log') `

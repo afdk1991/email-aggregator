@@ -241,7 +241,7 @@ func (c *RealGmailConnector) Close() error { return nil }
 
 type gmailMessageList struct {
 	Messages      []struct{ ID, ThreadID string } `json:"messages"`
-	NextPageToken string                         `json:"nextPageToken"`
+	NextPageToken string                          `json:"nextPageToken"`
 }
 
 type gmailMessage struct {
@@ -258,8 +258,8 @@ type gmailProfile struct {
 }
 
 type gmailHistoryWire struct {
-	ID              int64 `json:"id"`
-	MessagesAdded   []struct {
+	ID            int64 `json:"id"`
+	MessagesAdded []struct {
 		Message struct {
 			ID       string `json:"id"`
 			ThreadID string `json:"threadId"`
@@ -435,8 +435,14 @@ func parseRFC822Message(raw []byte, account, id string, size int64, provider mod
 		m.InternalDate = d.UnixMilli()
 	}
 	m.Subject = decodePOP3Header(h.Get("Subject"))
-	m.BodyText = pop3Body(msg, h)
-	m.Snippet = pop3Snippet(m.BodyText)
+	// 单次解析同时取得纯文本与 HTML 正文（pop3BodyParts 内部已缓冲，避免二次消费一次性 reader）
+	bodyText, bodyHTML := pop3BodyParts(msg, h)
+	if bodyText == "" {
+		bodyText = htmlToText(bodyHTML) // HTML-only 邮件（新闻简报等）兜底为纯文本
+	}
+	m.BodyText = bodyText
+	m.BodyHTML = bodyHTML
+	m.Snippet = pop3Snippet(bodyText)
 	return m, nil
 }
 

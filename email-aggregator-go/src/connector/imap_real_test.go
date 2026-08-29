@@ -143,3 +143,85 @@ func (s *imapCollectSink) OnMessage(_ context.Context, m model.CanonicalMail) er
 }
 
 func (s *imapCollectSink) OnDelete(_ context.Context, _ string) error { return nil }
+
+// TestRealIMAPConnector_BodyBackfill 验证初始全量同步会回填正文：
+// 1) mail1（UID 1）multipart/alternative 含 text/plain + HTML → BodyText 优先纯文本；
+// 2) mail2（UID 2）仅 text/html → BodyText 走 HTML 兜底剥离。
+// 覆盖「IMAP 连接器拉 BODY.PEEK[] 回填 BodyText/BodyHTML」的修复路径。
+func TestRealIMAPConnector_BodyBackfill(t *testing.T) {
+	srv, stop, err := StartMockIMAP()
+	if err != nil {
+		t.Fatalf("start mock imap: %v", err)
+	}
+	defer stop()
+
+	c := NewRealIMAPConnector(srv.Addr(), false, nil)
+	if err := c.Connect(context.Background(), cred("alice@example.com", "pw")); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	var got []model.CanonicalMail
+	sink := &imapCollectSink{out: &got}
+	if err := c.InitialFullSync(context.Background(), 0, sink); err != nil {
+		t.Fatalf("InitialFullSync: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 mails, got %d", len(got))
+	}
+
+	m1 := got[0]
+	if m1.ID != "1" {
+		t.Fatalf("mail1 ID = %q, want 1", m1.ID)
+	}
+	if !containsAny(m1.BodyText, "IMAP 第一封正文（测试）") {
+		t.Errorf("mail1 BodyText 应为 text/plain 优先: %q", m1.BodyText)
+	}
+	if !containsAny(m1.BodyHTML, "IMAP HTML 正文") {
+		t.Errorf("mail1 BodyHTML 应保留: %q", m1.BodyHTML)
+	}
+
+	m2 := got[1]
+	if m2.ID != "2" {
+		t.Fatalf("mail2 ID = %q, want 2", m2.ID)
+	}
+	if !containsAny(m2.BodyText, "只有 HTML 正文") || !containsAny(m2.BodyText, "第二封") {
+		t.Errorf("mail2 BodyText 应走 HTML 兜底: %q", m2.BodyText)
+	}
+}
+
+// TestRealIMAPConnector_BodyThrottleRetry 验证 139/163 式 BODY 抓取节流下的重试：
+// 首次 BODY 抓取被 mock 节流（返回 OK 无字面量），fetchBodyByUID 应按退避重试成功，
+// 最终两封邮件正文均非空。
+func TestRealIMAPConnector_BodyThrottleRetry(t *testing.T) {
+	orig := imapBodyRetryBackoffs
+	imapBodyRetryBackoffs = []time.Duration{0, 0} // 测试缩短退避
+	defer func() { imapBodyRetryBackoffs = orig }()
+
+	srv, stop, err := StartMockIMAP()
+	if err != nil {
+		t.Fatalf("start mock imap: %v", err)
+	}
+	defer stop()
+	srv.throttleBodyFetches = 1 // 首封 BODY 抓取节流一次
+
+	c := NewRealIMAPConnector(srv.Addr(), false, nil)
+	if err := c.Connect(context.Background(), cred("alice@example.com", "pw")); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	var got []model.CanonicalMail
+	sink := &imapCollectSink{out: &got}
+	if err := c.InitialFullSync(context.Background(), 0, sink); err != nil {
+		t.Fatalf("InitialFullSync: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 mails, got %d", len(got))
+	}
+	for _, m := range got {
+		if m.BodyText == "" {
+			t.Errorf("mail %s BodyText 应为空（节流重试应救回）: %q", m.ID, m.BodyText)
+		}
+	}
+}

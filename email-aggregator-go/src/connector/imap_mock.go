@@ -10,7 +10,9 @@ package connector
 
 import (
 	"bufio"
+	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +21,10 @@ import (
 type MockIMAPServer struct {
 	ln   net.Listener
 	addr string
+	// throttleBodyFetches 模拟 139/163 的 BODY 抓取节流：大于 0 时，接下来的
+	// throttleBodyFetches 次 BODY 抓取返回 "OK Fetch completed" 但不带字面量
+	// （仅测试用，仅测试协程可安全读写）。
+	throttleBodyFetches int
 }
 
 // StartMockIMAP 启动 mock IMAP 服务端，返回服务器实例、停止函数与可能的错误。
@@ -85,8 +91,20 @@ func (s *MockIMAPServer) handle(conn net.Conn) {
 			write("* FLAGS (\\Seen \\Flagged)")
 			write(tag + " OK [READ-WRITE] SELECT completed")
 		case strings.HasPrefix(cmd, "UID FETCH"), strings.HasPrefix(cmd, "FETCH"):
-			for _, l := range mockFetchResponses() {
-				write(l)
+			upper := strings.ToUpper(line)
+			if strings.Contains(upper, "BODY.PEEK[]") || strings.Contains(upper, "BODY[]") {
+				if s.throttleBodyFetches > 0 {
+					s.throttleBodyFetches--
+					write(tag + " OK FETCH completed") // 节流：无 * FETCH 字面量
+					continue
+				}
+				for _, l := range mockBodyResponses(line) {
+					write(l)
+				}
+			} else {
+				for _, l := range mockFetchResponses() {
+					write(l)
+				}
 			}
 			write(tag + " OK FETCH completed")
 		case cmd == "IDLE":
@@ -114,5 +132,68 @@ func mockFetchResponses() []string {
 X-Header: x
  BODYSTRUCTURE (("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "7BIT" 100 5 NIL NIL NIL)("APPLICATION" "OCTET-STREAM" ("NAME" "doc.pdf") NIL NIL "BASE64" 500 NIL ("attachment" "doc.pdf") NIL) "MIXED"))`,
 		`* 2 FETCH (UID 2 RFC822.SIZE 512 INTERNALDATE "18-Jul-2026 09:00:00 +0000" FLAGS () ENVELOPE ("Fri, 18 Jul 2026 09:00:00 +0000" "第二封无地址" NIL NIL NIL NIL NIL NIL NIL) BODYSTRUCTURE ("TEXT" "HTML" NIL NIL NIL "7BIT" 50 3 NIL NIL NIL))`,
+	}
+}
+
+// mockBodyResponses 响应 UID FETCH (BODY.PEEK[])：按请求的 UID 返回完整 RFC822 原文（含字面量）。
+func mockBodyResponses(cmdLine string) []string {
+	var out []string
+	for uid, raw := range mockIMAPRaws() {
+		if !mockRequestedUID(cmdLine, uid) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("* %d FETCH (UID %d BODY[] {%d}\r\n%s)\r\n", uid, uid, len(raw), raw))
+	}
+	return out
+}
+
+// mockRequestedUID 判断命令行的 UID 列表中是否含指定 uid（支持 "1,2" 或 "1" 形式）。
+func mockRequestedUID(cmdLine string, uid int) bool {
+	up := strings.ToUpper(cmdLine)
+	i := strings.Index(up, "UID FETCH")
+	if i < 0 {
+		return false
+	}
+	rest := cmdLine[i+len("UID FETCH"):]
+	if j := strings.Index(rest, "("); j >= 0 {
+		rest = rest[:j]
+	}
+	rest = strings.TrimSpace(rest)
+	for _, part := range strings.Split(rest, ",") {
+		if strings.TrimSpace(part) == strconv.Itoa(uid) {
+			return true
+		}
+	}
+	return false
+}
+
+// mockIMAPRaws 返回 mock IMAP 服务端的原始 RFC822 邮件（UID → raw）。
+// mail1 带 text/plain + HTML（验证 text/plain 优先），mail2 仅 HTML（验证 HTML 兜底）。
+func mockIMAPRaws() map[int]string {
+	return map[int]string{
+		1: "From: alice@example.com\r\n" +
+			"To: bob@example.com\r\n" +
+			"Cc: carol@example.com\r\n" +
+			"Subject: =?UTF-8?B?5rWL6K+V6YKu5Lu277yMSU1BUCA=?=\r\n" +
+			"Date: Thu, 17 Jul 2026 10:00:00 +0000\r\n" +
+			"Message-ID: <imap-1@example.com>\r\n" +
+			"Content-Type: multipart/alternative; boundary=m1\r\n" +
+			"\r\n" +
+			"--m1\r\n" +
+			"Content-Type: text/plain; charset=utf-8\r\n" +
+			"\r\n" +
+			"IMAP 第一封正文（测试）。\r\n" +
+			"--m1\r\n" +
+			"Content-Type: text/html; charset=utf-8\r\n" +
+			"\r\n" +
+			"<p>IMAP HTML 正文</p>\r\n" +
+			"--m1--\r\n",
+		2: "From: bob@example.com\r\n" +
+			"Subject: second imap mail\r\n" +
+			"Date: Fri, 18 Jul 2026 09:00:00 +0000\r\n" +
+			"Message-ID: <imap-2@example.com>\r\n" +
+			"Content-Type: text/html; charset=utf-8\r\n" +
+			"\r\n" +
+			"<html><body><h1>第二封</h1><p>只有 HTML 正文</p></body></html>\r\n",
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -164,6 +165,7 @@ func (c *RealIMAPConnector) fetchSeqAndSink(ctx context.Context, from, to int, s
 		return err
 	}
 	c.finishMails(mails)
+	c.fetchBodyTexts(mails)
 	for _, m := range mails {
 		if since > 0 && m.InternalDate < since {
 			continue
@@ -424,6 +426,91 @@ func (c *RealIMAPConnector) fetchAndSink(ctx context.Context, set string, since 
 	return nil
 }
 
+// fetchBodyTexts 为元数据已就绪的邮件批量回填正文：逐 UID 拉 BODY.PEEK[] 全文，
+// 经 RFC822 解析取 text/plain（HTML-only 兜底）写入 BodyText/BodyHTML。
+// 单批 1 封以规避 139 等服务器对单命令大响应的截断（~64KB）；新增邮件量小，成本可忽略。
+func (c *RealIMAPConnector) fetchBodyTexts(mails []model.CanonicalMail) {
+	for i := range mails {
+		raw, err := c.fetchBodyByUID(mails[i].ID)
+		if err != nil || len(raw) == 0 {
+			continue // 单封失败降级：保留元数据，正文留空
+		}
+		pm, err := parseRFC822Message(raw, mails[i].AccountID, mails[i].ID, mails[i].SizeBytes, model.ProviderIMAP)
+		if err != nil {
+			continue
+		}
+		mails[i].BodyText = pm.BodyText
+		mails[i].BodyHTML = pm.BodyHTML
+	}
+}
+
+// fetchBodyByUID 单封拉取完整原始邮件（BODY.PEEK[]，不产生 \Seen 标记副作用）。
+// 139/163 等国产服务器对 BODY 拉取存在间歇性节流：限流窗口内对同一命令返回
+// “tag OK Fetch completed”但不带字面量（实测 5 连败后冷却 ~30s 单次即成功）。
+// 因此空结果不立即放弃，按 imapBodyRetryBackoffs 退避重试至多 2 次。
+var imapBodyRetryBackoffs = []time.Duration{0, 300 * time.Millisecond, 1200 * time.Millisecond}
+
+func (c *RealIMAPConnector) fetchBodyByUID(uid string) ([]byte, error) {
+	var lastErr error
+	for attempt, d := range imapBodyRetryBackoffs {
+		if d > 0 {
+			time.Sleep(d)
+		}
+		raw, err := c.fetchBodyOnce("UID FETCH " + uid + " (BODY.PEEK[])")
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(raw) > 0 {
+			return raw, nil
+		}
+		if attempt == len(imapBodyRetryBackoffs)-1 {
+			return nil, nil
+		}
+	}
+	return nil, lastErr
+}
+
+// fetchBodyOnce 执行一次 BODY 抓取命令，返回字面量正文；OK 但无字面量返回空切片。
+func (c *RealIMAPConnector) fetchBodyOnce(cmd string) ([]byte, error) {
+	tag := c.nextTag()
+	if err := c.writeLine(tag + " " + cmd); err != nil {
+		return nil, err
+	}
+	for {
+		line, err := c.readLine()
+		if err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(line, tag) {
+			if strings.Contains(line, " OK ") || strings.HasSuffix(line, "OK") {
+				return nil, nil // 未取到正文（限流或邮件已被删除）
+			}
+			return nil, fmt.Errorf("imap body fetch: %s", line)
+		}
+		if raw, ok := bodyLiteralFromLine(line); ok {
+			return raw, nil
+		}
+	}
+}
+
+var bodyLiteralRE = regexp.MustCompile(`\{(\d+)\}`)
+
+// bodyLiteralFromLine 从 readLine 返回的行中提取 BODY[] 字面量。
+// readLine 已把 {N} 后的 N 字节内联到行尾（首段的 \r\n 被 TrimRight，故此处只匹配 {N}）。
+func bodyLiteralFromLine(line string) ([]byte, bool) {
+	loc := bodyLiteralRE.FindStringIndex(line)
+	if loc == nil {
+		return nil, false
+	}
+	n, _ := strconv.Atoi(line[loc[0]+1 : loc[1]-1])
+	after := line[loc[1]:]
+	if len(after) < n {
+		return nil, false
+	}
+	return []byte(after[:n]), true
+}
+
 func (c *RealIMAPConnector) uidFetch(set string) ([]model.CanonicalMail, error) {
 	tag := c.nextTag()
 	resp, err := c.roundtrip(tag, "UID FETCH "+set+" ("+defaultFetchItems+")")
@@ -435,6 +522,7 @@ func (c *RealIMAPConnector) uidFetch(set string) ([]model.CanonicalMail, error) 
 		return nil, err
 	}
 	c.finishMails(mails)
+	c.fetchBodyTexts(mails)
 	return mails, nil
 }
 

@@ -153,7 +153,7 @@ func (s *PgMetadataStore) UpsertMail(tenantID string, m model.CanonicalMail) err
 		INSERT INTO mail_metadata
 		  (id, tenant_id, account_id, provider, folder, subject, from_addr, body_text, internal_date, size_bytes, raw_object_key, cursor_json, read)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		ON CONFLICT (id) DO UPDATE SET subject = EXCLUDED.subject, read = EXCLUDED.read`,
+		ON CONFLICT (id) DO UPDATE SET subject = EXCLUDED.subject, from_addr = EXCLUDED.from_addr, body_text = EXCLUDED.body_text, internal_date = EXCLUDED.internal_date, size_bytes = EXCLUDED.size_bytes, provider = EXCLUDED.provider, folder = EXCLUDED.folder, raw_object_key = EXCLUDED.raw_object_key, read = EXCLUDED.read`,
 		m.ID, tenantID, m.AccountID, string(m.Provider), m.Folder, m.Subject,
 		m.From.Email, m.BodyText, m.InternalDate, m.SizeBytes, m.RawObjectKey, cursorJSON(m.Cursor), m.Read)
 	return err
