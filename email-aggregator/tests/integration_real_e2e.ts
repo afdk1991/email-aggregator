@@ -28,6 +28,15 @@ const cfg = {
   openSearchUser: env("OPENSEARCH_USER", "admin"),
   openSearchPass: env("OPENSEARCH_PASS", ""),
   kafkaBrokers: [env("KAFKA_BROKERS", "127.0.0.1:9092")],
+  // advertised listener 主机重写（容器名 -> 宿主可达地址），同 Go WithDial
+  kafkaHostRewrite: env("KAFKA_HOST_REWRITE", "deploy-kafka-1=127.0.0.1")
+    .split(",")
+    .filter((s) => s.includes("="))
+    .reduce<Record<string, string>>((acc, kv) => {
+      const [k, v] = kv.split("=");
+      if (k && v) acc[k.trim()] = v.trim();
+      return acc;
+    }, {}),
 };
 
 const TID = "default";

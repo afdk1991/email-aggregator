@@ -63,6 +63,11 @@ export interface IntegrationConfig {
   /** ["localhost:9092"] */
   kafkaBrokers: string[];
   /**
+   * Kafka advertised listener 主机重写（跨网络/容器名场景，同 Go WithDial）。
+   * 例：{ "deploy-kafka-1": "127.0.0.1" } 把 broker 通告的容器名重写为宿主可达地址。
+   */
+  kafkaHostRewrite?: Record<string, string>;
+  /**
    * KMS 端点（Phase 1+ 物理隔离：租户派生 KEK）。
    * 可选 —— 缺省回退到 InMemoryKms（仅 PoC，生产应接入 Vault / KMS / KMS-FOR-PCloud）。
    */
@@ -133,7 +138,7 @@ export async function Wire(cfg: IntegrationConfig): Promise<RealAdapters> {
   const hub = NewWsHub();
   const kms = NewTenantKms(cfg.kmsEndpoint);
   return {
-    bus: NewKafkaAdapter(cfg.kafkaBrokers),
+    bus: NewKafkaAdapter(cfg.kafkaBrokers, { hostRewrite: cfg.kafkaHostRewrite }),
     metadata: pg,
     cursor: pg,
     content: obj,
@@ -601,15 +606,23 @@ export class KafkaAdapter implements EventBus {
   private consumers = new Map<string, KafkaConsumerLike>();
   private handlers = new Map<Topic, Handler>();
   private brokers: string[];
+  private hostRewrite?: Record<string, string>;
   private running = false;
 
   /** 同步构造（与 Go NewKafkaAdapter 同构：仅记 brokers，真实连接在 ensure() 懒触发） */
-  constructor(brokers: string[]) {
+  constructor(brokers: string[], opts: { hostRewrite?: Record<string, string> } = {}) {
     this.brokers = brokers;
+    this.hostRewrite = opts.hostRewrite;
   }
 
-  static async create(brokers: string[]): Promise<KafkaAdapter> {
-    return new KafkaAdapter(brokers);
+  /** 覆盖 advertised listener 主机重写（同 Go KafkaAdapter.WithDial；跨网络/容器名场景）。 */
+  withHostRewrite(map: Record<string, string>): KafkaAdapter {
+    this.hostRewrite = map;
+    return this;
+  }
+
+  static async create(brokers: string[], opts?: { hostRewrite?: Record<string, string> }): Promise<KafkaAdapter> {
+    return new KafkaAdapter(brokers, opts);
   }
 
   /** 懒初始化 kafka + producer（首次 publish/subscribe 时触发） */
@@ -624,7 +637,19 @@ export class KafkaAdapter implements EventBus {
     if (typeof Kafka !== "function") {
       throw new Error("[KafkaAdapter] kafkajs 模块未导出 Kafka");
     }
-    this.kafka = new Kafka({ brokers: this.brokers }) as unknown as KafkaLike;
+    const clientCfg: Record<string, unknown> = { brokers: this.brokers };
+    if (this.hostRewrite && Object.keys(this.hostRewrite).length > 0) {
+      // advertised listener 与客户端网络不一致时（如容器名），经 socketFactory 重写目标主机。
+      // 与 Go kafka-go WithDial 同构；PLAINTEXT 场景仅需 net.connect。
+      const net = await import("node:net");
+      clientCfg.socketFactory = (opts: { host: string; port: number; ssl?: unknown; onConnect?: () => void }) => {
+        const host = this.hostRewrite?.[opts.host] ?? opts.host;
+        const socket = net.connect({ host, port: opts.port }, opts.onConnect);
+        socket.setKeepAlive(true, 60000);
+        return socket;
+      };
+    }
+    this.kafka = new Kafka(clientCfg) as unknown as KafkaLike;
     this.producer = this.kafka.producer();
     await this.producer.connect();
   }
@@ -851,8 +876,11 @@ export async function NewOpenSearchIndex(addr: string, user: string, pass: strin
   return OpenSearchIndex.create(addr, user, pass);
 }
 
-export function NewKafkaAdapter(brokers: string[]): KafkaAdapter {
+export function NewKafkaAdapter(
+  brokers: string[],
+  opts: { hostRewrite?: Record<string, string> } = {},
+): KafkaAdapter {
   // KafkaAdapter 的真实连接在首次 publish/subscribe 时懒触发（与 Go 不同——Go 在构造时即创建 Writer）
   // 这样可以容忍 Kafka 暂时不可达时仍能装配（启动顺序不阻塞）
-  return new KafkaAdapter(brokers);
+  return new KafkaAdapter(brokers, opts);
 }

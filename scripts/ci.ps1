@@ -65,6 +65,12 @@ Push-Location (Join-Path $Root 'email-aggregator-go')
 try {
     if (-not (Get-Command go -ErrorAction SilentlyContinue)) { Bad '未找到 go 命令' }
     else {
+        # 统一 Go 工具链缓存/代理（本地 .gopath 已有 x/text 等依赖，避免回源下载失败）
+        $env:GOFLAGS = '-mod=mod'
+        $env:GOPATH = Join-Path $Root 'email-aggregator-go\.gopath'
+        $env:GOMODCACHE = Join-Path $Root 'email-aggregator-go\.gopath\pkg\mod'
+        $env:GOCACHE = Join-Path $Root 'email-aggregator-go\.gocache'
+        $env:GOPROXY = 'https://goproxy.cn,direct'
         go build ./... 2>&1 | Tee-Object -FilePath (Join-Path $LogDir 'go-build.log') | Select-Object -Last 5
         if ($LASTEXITCODE -eq 0) { Ok 'go build ./... PASS' } else { Bad "go build 失败 RC=$LASTEXITCODE" }
 
@@ -75,15 +81,37 @@ try {
         if ($LASTEXITCODE -eq 0) { Ok 'go test ./... PASS' } else { Bad "go test 失败 RC=$LASTEXITCODE" }
 
         if ($Integration) {
-            $env:GOFLAGS = '-mod=mod'
-            $env:GOPATH = Join-Path $Root 'email-aggregator-go\.gopath'
-            $env:GOMODCACHE = Join-Path $Root 'email-aggregator-go\.gopath\pkg\mod'
-            $env:GOPROXY = 'https://goproxy.cn,direct'
             go build -tags integration ./... 2>&1 | Tee-Object -FilePath (Join-Path $LogDir 'go-integ-build.log') | Select-Object -Last 5
             if ($LASTEXITCODE -eq 0) { Ok 'go build -tags integration PASS' } else { Bad "集成构建失败 RC=$LASTEXITCODE" }
+
+            # 真实中间件联调：Go 集成测试（真实 Kafka e2e）+ TS 集成层真实联调。
+            # 需本地已启动 deploy/docker-compose.yml 中间件栈（PG/MinIO/OpenSearch/Kafka）。
+            go test -tags integration ./src/integration/ 2>&1 | Tee-Object -FilePath (Join-Path $LogDir 'go-integ-test.log') | Select-Object -Last 4
+            if ($LASTEXITCODE -eq 0) { Ok 'go test -tags integration ./src/integration/ PASS' } else { Bad "Go 集成测试失败 RC=$LASTEXITCODE" }
         }
     }
 } finally { Pop-Location }
+
+# ── 3.5) TS 集成层真实联调（需中间件栈，-Integration 时执行）──
+if ($Integration) {
+    Step '3/3.5  TS 集成层真实联调（PG/MinIO/OpenSearch/Kafka）'
+    Push-Location (Join-Path $Root 'email-aggregator')
+    try {
+        $env:PG_DSN = 'postgres://agg:agg-secret@127.0.0.1:15432/mailagg'
+        $env:MINIO_ENDPOINT = '127.0.0.1:9000'
+        $env:MINIO_BUCKET = 'agg-mail'
+        $env:MINIO_ACCESS_KEY = 'agg'
+        $env:MINIO_SECRET_KEY = 'agg-secret'
+        $env:MINIO_SECURE = 'false'
+        $env:OPENSEARCH_ADDR = 'https://127.0.0.1:9200'
+        $env:OPENSEARCH_USER = 'admin'
+        $env:OPENSEARCH_PASS = 'Kp3mQ9@vL2*rT7xA8'
+        $env:KAFKA_BROKERS = '127.0.0.1:9092'
+        $env:KAFKAJS_NO_PARTITIONER_WARNING = '1'
+        & $node --experimental-strip-types tests/integration_real_e2e.ts 2>&1 | Tee-Object -FilePath (Join-Path $LogDir 'ts-integ-real.log') | Select-Object -Last 8
+        if ($LASTEXITCODE -eq 0) { Ok 'TS 集成层真实联调 PASS' } else { Bad "TS 集成层真实联调失败 RC=$LASTEXITCODE" }
+    } finally { Pop-Location }
+}
 
 # ── 3) React 前端 ──
 Step '3/3  React 前端（email-aggregator-web）'

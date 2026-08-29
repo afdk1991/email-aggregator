@@ -45,6 +45,10 @@ services:
   opensearch:
     image: opensearchproject/opensearch:2
     restart: unless-stopped
+    # 接入 mixmlaal SaaS 业务链：加入其网络，供业务容器检索审计/日志
+    networks:
+      - default
+      - mixmlaal
     environment:
       discovery.type: single-node
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
@@ -64,6 +68,10 @@ services:
     image: apache/kafka:latest
     restart: unless-stopped
     ports: ["${KAFKA_PORT}:9092"]
+    # 接入 mixmlaal SaaS 业务链：加入其网络，advertised 用容器名供业务容器解析
+    networks:
+      - default
+      - mixmlaal
     environment:
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
       KAFKA_NODE_ID: "1"
@@ -72,7 +80,7 @@ services:
       # 监听 0.0.0.0 以便「宿主机（集成服务运行处）」经 127.0.0.1:9092 与「容器内」经 kafka:9092 均可连；
       # 广播地址用 localhost:9092，确保宿主机上的 kafka-go 客户端在 bootstrap 后能被正确重定向（否则会拿到 kafka:9092 而解析失败）。
       KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://kafka:9093"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://deploy-kafka-1:9092"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
       KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
@@ -96,3 +104,9 @@ volumes:
   miniodata:
   rpdata:
   osdata:
+
+networks:
+  # mixmlaal SaaS 业务网络（external），让 Kafka 可被业务容器经 deploy-kafka-1 访问
+  mixmlaal:
+    external: true
+    name: mixmlaal_mixmlaal-network

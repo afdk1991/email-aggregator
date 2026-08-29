@@ -25,6 +25,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/mail"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -145,7 +146,8 @@ func (c *RealPOP3Connector) StreamChanges(ctx context.Context, cursor model.Sync
 			return err
 		}
 		maxHW := hw
-		for seq, uidl := range uidls {
+		for _, seq := range sortedUIDLKeys(uidls) {
+			uidl := uidls[seq]
 			if uidl <= hw {
 				continue
 			}
@@ -241,6 +243,17 @@ func (c *RealPOP3Connector) cmdAuth(cred model.Credential) error {
 		return fmt.Errorf("pop3 PASS rejected: %s", r)
 	}
 	return nil
+}
+
+// sortedUIDLKeys 返回 UIDL 映射的序号，按升序排列——POP3 序号即邮箱内的消息顺序（1..N），
+// 保证拉取/回调顺序确定（Go map 迭代顺序本身是随机的，直接 range 会导致顺序不确定）。
+func sortedUIDLKeys(uidls map[int]string) []int {
+	seqs := make([]int, 0, len(uidls))
+	for seq := range uidls {
+		seqs = append(seqs, seq)
+	}
+	sort.Ints(seqs)
+	return seqs
 }
 
 // cmdUIDL 返回 (序号 → UIDL) 映射。
