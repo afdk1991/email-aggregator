@@ -345,38 +345,9 @@ func (c *RealPOP3Connector) readLineLocked() (string, error) {
 // ── RFC 822 → CanonicalMail 解析 ─────────────────────────────────────────────
 
 // parsePOP3Message 用 net/mail 解析原始 RFC 822 邮件。
-// id = UIDL（作为幂等键，供摄取层去重）。
+// id = UIDL（作为幂等键，供摄取层去重）。复用共享的 parseRFC822Message（provider=pop3）。
 func parsePOP3Message(raw []byte, account, uidl string, size int64) (model.CanonicalMail, error) {
-	msg, err := mail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		return model.CanonicalMail{}, fmt.Errorf("pop3 parse mime: %w", err)
-	}
-	h := msg.Header
-
-	m := model.CanonicalMail{
-		ID:          uidl,
-		AccountID:   account,
-		Provider:    model.ProviderPOP3,
-		Folder:      "INBOX",
-		SizeBytes:   size,
-		HasAttachment: false,
-	}
-	if f, err := h.AddressList("From"); err == nil && len(f) > 0 {
-		m.From = pop3Address(f[0])
-	}
-	if t, err := h.AddressList("To"); err == nil {
-		m.To = pop3Addresses(t)
-	}
-	if cc, err := h.AddressList("Cc"); err == nil {
-		m.Cc = pop3Addresses(cc)
-	}
-	if d, err := h.Date(); err == nil {
-		m.InternalDate = d.UnixMilli()
-	}
-	m.Subject = decodePOP3Header(h.Get("Subject"))
-	m.BodyText = pop3Body(msg, h)
-	m.Snippet = pop3Snippet(m.BodyText)
-	return m, nil
+	return parseRFC822Message(raw, account, uidl, size, model.ProviderPOP3)
 }
 
 // decodePOP3Header 显式解码 RFC 2047 编码词（net/mail Get 亦会解码，此处幂等兜底）。

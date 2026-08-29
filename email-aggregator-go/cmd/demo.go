@@ -203,5 +203,90 @@ func main() {
 	fmt.Printf("[pop3:store] tenant=%s total mails in metadata = %d\n", tidP3, nP3)
 	fmt.Println("POP3 connector e2e DONE")
 
+	// 11) Gmail 真实适配器端到端（Gmail API REST + OAuth2 Bearer + historyId 增量，进程内 mock Gmail API）
+	fmt.Println("\n-- Gmail connector end-to-end --")
+	gmailRawDemo := func(subject, from, to, body string) string {
+		return "From: " + from + "\r\n" +
+			"To: " + to + "\r\n" +
+			"Subject: " + subject + "\r\n" +
+			"Date: Fri, 17 Jul 2026 10:00:00 +0000\r\n" +
+			"Message-ID: <gm-" + subject + "@demo>\r\n" +
+			"Content-Type: text/plain; charset=utf-8\r\n" +
+			"\r\n" + body + "\r\n"
+	}
+	gmailSrv, gmailStop, err := connector.StartMockGmailAPI()
+	if err != nil {
+		panic(err)
+	}
+	defer gmailStop()
+	gmailSrv.Inject(gmailRawDemo("Gmail Hello", "alice@example.com", "bob@example.com", "Gmail 第一封欢迎正文"), 1784282400000)
+	gmailSrv.Inject(gmailRawDemo("Gmail Invoice", "vendor@example.com", "alice@example.com", "Gmail 第二封发票正文"), 1784365200000)
+
+	gmailConn, err := connector.NewDefaultRegistry().Create(model.ProviderGmail, map[string]string{"endpoint": gmailSrv.Addr() + "/gmail/v1"})
+	if err != nil {
+		panic(err)
+	}
+	gmailCred := model.Credential{Type: "oauth2", Username: "alice@example.com", OAuth: &model.OAuthToken{AccessToken: "demo-token"}}
+	if err := gmailConn.Connect(ctx, gmailCred); err != nil {
+		panic(err)
+	}
+	defer func() { _ = gmailConn.Close() }()
+
+	busP4 := events.NewInMemoryBus()
+	metaP4 := store.NewInMemoryMetadataStore()
+	contentP4 := store.NewInMemoryContentStore()
+	indexP4 := search.NewInMemorySearchIndex()
+	notifP4 := notify.NewInMemoryNotifier()
+	notifP4.AddSink("acc_gmail", notify.NewFuncSink(func(p notify.NotificationPayload) {
+		fmt.Printf("  [gmail:ws-push] tenant=%s new-mail account=%s preview=%q\n", p.TenantID, p.AccountID, p.Preview)
+	}))
+	workerP4 := ingest.NewIngestWorker(busP4, metaP4, contentP4, indexP4, notifP4)
+	if err := workerP4.Start(ctx); err != nil {
+		panic(err)
+	}
+	orchP4 := syncsvc.NewOrchestrator(syncsvc.OrchestratorDeps{
+		Bus:        busP4,
+		Vault:      vault,
+		Connector:  gmailConn,
+		Credential: gmailCred,
+	})
+	if err := orchP4.HandleSyncTask(ctx, events.SyncTaskEvent{
+		TenantID:  demoTenant, // ADR-009：Gmail 采集同样强制租户透传
+		AccountID: "acc_gmail",
+		Mode:      "initial",
+	}); err != nil {
+		panic(err)
+	}
+	tidP4 := tenant.Resolve(demoTenant)
+	hitsP4, _ := indexP4.Search(tidP4, "acc_gmail", "发票", 10)
+	fmt.Printf("[gmail:search] tenant=%s query=发票 -> %d hit(s)\n", tidP4, len(hitsP4))
+	nP4, _ := metaP4.Count(tidP4, "acc_gmail")
+	fmt.Printf("[gmail:store] tenant=%s total mails in metadata = %d\n", tidP4, nP4)
+
+	// 增量：注入第三封 → 以 historyId 为断点续拉（INCREMENTAL 为 FSM 终态，用新 Orchestrator 实例）
+	gmailReal := gmailConn.(*connector.RealGmailConnector) // 具体类型：取会话内最新 historyId（空批次游标持久化）
+	baseline := gmailReal.LastHistoryID()
+	fmt.Printf("[gmail:incremental] baseline historyId=%s\n", baseline)
+	gmailSrv.Inject(gmailRawDemo("Gmail Meeting", "meet@example.com", "alice@example.com", "Gmail 第三封会议通知正文"), 1784448000000)
+	orchP4b := syncsvc.NewOrchestrator(syncsvc.OrchestratorDeps{
+		Bus:        busP4,
+		Vault:      vault,
+		Connector:  gmailConn,
+		Credential: gmailCred,
+	})
+	if err := orchP4b.HandleSyncTask(ctx, events.SyncTaskEvent{
+		TenantID:  demoTenant,
+		AccountID: "acc_gmail",
+		Mode:      "incremental",
+		Cursor:    model.SyncCursor{ProviderSpecific: map[string]string{"historyId": baseline}},
+	}); err != nil {
+		panic(err)
+	}
+	hitsP4b, _ := indexP4.Search(tidP4, "acc_gmail", "会议", 10)
+	fmt.Printf("[gmail:search-incremental] tenant=%s query=会议 -> %d hit(s)\n", tidP4, len(hitsP4b))
+	nP4b, _ := metaP4.Count(tidP4, "acc_gmail")
+	fmt.Printf("[gmail:store] tenant=%s total mails in metadata after incremental = %d\n", tidP4, nP4b)
+	fmt.Println("Gmail connector e2e DONE")
+
 	fmt.Println("demo DONE")
 }

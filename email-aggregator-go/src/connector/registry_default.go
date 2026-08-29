@@ -11,12 +11,14 @@ import (
 //
 // 注册映射：
 //   - imap      → RealIMAPConnector（真实 IMAP，纯标准库实现，零第三方依赖）
-//   - gmail     → 复用 RealIMAPConnector（默认指向 imap.gmail.com:993，cfg["address"] 可覆盖）
+//   - gmail     → RealGmailConnector（Gmail API REST + OAuth2 Bearer + historyId 增量，
+//               架构 §10/§12「走官方 API」；cfg["endpoint"] 可覆盖基址，默认生产 Gmail API）
 //   - exchange  → EWSConnector（Exchange / EWS，SOAP，纯标准库实现）
 //   - pop3      → RealPOP3Connector（真实 POP3，RFC 1939，纯标准库实现；默认 110 端口可 STLS，995 隐式 TLS 用 useTLS=true）
 //
 // 约定：factory 从 cfg 读取连接参数（address / useTLS / endpoint）。
 // IMAP/POP3 必须携带 cfg["address"]，否则报错（避免静默降级到错误的默认主机）。
+// Gmail 走 OAuth2 Bearer，由 Connect(cred.OAuth) 提供；endpoint 缺省为生产 Gmail API。
 // 未在此注册的协议（如 enterprise）由调用方按需 Register，保持零侵入。
 func NewDefaultRegistry() *ConnectorRegistry {
 	reg := NewConnectorRegistry()
@@ -30,12 +32,8 @@ func NewDefaultRegistry() *ConnectorRegistry {
 	})
 
 	reg.Register(model.ProviderGmail, func(_ model.Provider, cfg map[string]string) (model.Connector, error) {
-		addr := cfg["address"]
-		if addr == "" {
-			addr = "imap.gmail.com:993"
-		}
-		// Gmail 走 IMAP 协议（IMAP4 + STARTTLS / 993 隐式 TLS），复用真实 IMAP 适配器。
-		return NewRealIMAPConnector(addr, true, nil), nil
+		// Gmail API REST（非 IMAP 复用）；endpoint 缺省走生产 gmail.googleapis.com
+		return NewRealGmailConnector(cfg["endpoint"]), nil
 	})
 
 	reg.Register(model.ProviderExchange, func(_ model.Provider, cfg map[string]string) (model.Connector, error) {

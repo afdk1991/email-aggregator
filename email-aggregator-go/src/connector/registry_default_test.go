@@ -25,13 +25,16 @@ func TestDefaultRegistry(t *testing.T) {
 		t.Fatalf("imap provider mismatch: %s", c.Capabilities().Provider)
 	}
 
-	// Gmail 缺 address 走默认 imap.gmail.com:993，且应成功创建（复用 IMAP 适配器）
+	// Gmail 无 cfg 走默认生产 Gmail API 基址，且应成功创建（RealGmailConnector，OAuth Bearer 由 Connect 提供）
 	g, err := reg.Create(model.ProviderGmail, nil)
 	if err != nil {
 		t.Fatalf("create gmail: %v", err)
 	}
 	if g == nil {
 		t.Fatal("gmail connector is nil")
+	}
+	if g.Capabilities().Provider != model.ProviderGmail {
+		t.Fatalf("gmail provider mismatch: %s", g.Capabilities().Provider)
 	}
 
 	// Exchange / EWS
