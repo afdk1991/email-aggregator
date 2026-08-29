@@ -9,6 +9,7 @@ import (
 	"email-aggregator-go/src/events"
 	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/security"
+	"email-aggregator-go/src/store"
 	"email-aggregator-go/src/tenant"
 )
 
@@ -19,6 +20,7 @@ type OrchestratorDeps struct {
 	BackoffMaxMs int
 	Connector    model.Connector   // 协议适配器（IMAP/POP3/Exchange/Gmail）
 	Credential   model.Credential  // 连接凭据（运行时内存态；生产环境由 Vault 解密注入）
+	Accounts     store.AccountStore // 可选：连接/账户服务（未挂载则不做状态门控，向后兼容）
 }
 
 // Orchestrator 同步编排器：消费 sync-tasks，推进状态机，驱动 Connector 采集，发布 mail-ingested
@@ -87,6 +89,23 @@ func (s *busSink) OnDelete(_ context.Context, id string) error {
 //
 // 任意步骤失败 → 状态机迁移至 ERROR，返回错误（调用方可使用 Backoff 重试）。
 func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskEvent) error {
+	// ── 连接/账户服务门控：paused 跳过，error 拦截，未注册账户向后兼容放行 ──
+	if o.deps.Accounts != nil {
+		acct, err := o.deps.Accounts.GetAccount(tenant.Resolve(task.TenantID), task.AccountID)
+		if err != nil {
+			return fmt.Errorf("account registry lookup (account=%s): %w", task.AccountID, err)
+		}
+		if acct != nil {
+			switch acct.Status {
+			case model.AccountPaused:
+				fmt.Printf("[orchestrator] account=%s status=paused -> skip sync\n", task.AccountID)
+				return nil
+			case model.AccountError:
+				return fmt.Errorf("account=%s status=error -> sync blocked, needs manual recovery", task.AccountID)
+			}
+		}
+	}
+
 	// ── Phase 1: UNCONNECTED → AUTHORIZING ──
 	next, err := Advance(o.state, EvAuthorize)
 	if err != nil {
@@ -149,6 +168,17 @@ func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskE
 
 	fmt.Printf("[orchestrator] tenant=%s account=%s mode=%s -> state=%s\n",
 		tenant.Resolve(task.TenantID), task.AccountID, task.Mode, o.state)
+
+	// 同步成功后回写账户最近同步时间（连接/账户服务，未挂载则跳过）
+	if o.deps.Accounts != nil {
+		if acct, err := o.deps.Accounts.GetAccount(tenant.Resolve(task.TenantID), task.AccountID); err == nil && acct != nil {
+			_ = o.deps.Accounts.Upsert(tenant.Resolve(task.TenantID), model.Account{
+				ID: task.AccountID, Provider: acct.Provider, Email: acct.Email,
+				DisplayName: acct.DisplayName, Status: acct.Status, SyncFolder: acct.SyncFolder,
+				CredentialsRef: acct.CredentialsRef, LastSyncAt: time.Now().UnixMilli(),
+			})
+		}
+	}
 	return nil
 }
 

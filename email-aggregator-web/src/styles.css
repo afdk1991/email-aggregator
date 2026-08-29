@@ -127,6 +127,102 @@ body {
   line-height: 1;
 }
 
+/* 连接/账户服务：状态徽标（paused 灰 / error 红） */
+.chip-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.account-chip.status-paused .chip-status {
+  background: #6b7280;
+  color: #fff;
+}
+.account-chip.status-error .chip-status {
+  background: var(--accent, #e5484d);
+  color: #fff;
+}
+
+/* 当前账户操作按钮组（暂停/恢复 + 删除） */
+.account-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+.account-actions button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.account-actions button:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+.account-actions button.danger-btn:hover:not(:disabled) {
+  border-color: var(--accent, #e5484d);
+  color: var(--accent, #e5484d);
+}
+.account-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 添加账户入口按钮 */
+.add-account-btn {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px dashed var(--primary);
+  color: var(--primary);
+  cursor: pointer;
+}
+
+/* 添加账户内联表单 */
+.account-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 8px 0 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.account-form input,
+.account-form select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg, #fff);
+  font-size: 13px;
+  min-width: 160px;
+}
+.account-form input:first-child {
+  min-width: 140px;
+}
+.account-form button {
+  padding: 6px 16px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+}
+.account-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* 邮件项未读态：加粗主题 + 左侧红点 */
 .mail-item.unread .mail-subject {
   font-weight: 700;

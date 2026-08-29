@@ -22,14 +22,21 @@ type ApiServer struct {
 	metadata store.MetadataStore
 	search   search.SearchIndex
 	notifier notify.Notifier
-	gw       *aigateway.Router // 可选：AI 能力路由网关（ADR-010）
-	wsHub    *notify.Hub        // 可选：WebSocket 实时推送（零依赖 Hub）
+	gw       *aigateway.Router   // 可选：AI 能力路由网关（ADR-010）
+	wsHub    *notify.Hub         // 可选：WebSocket 实时推送（零依赖 Hub）
+	accounts store.AccountStore  // 可选：连接/账户服务（未挂载时 /api/accounts 回退元数据推导）
 	port     int
 }
 
 // NewApiServer 构造（注入元数据仓储、检索索引、通知器）
 func NewApiServer(metadata store.MetadataStore, idx search.SearchIndex, notifier notify.Notifier, port int) *ApiServer {
 	return &ApiServer{metadata: metadata, search: idx, notifier: notifier, port: port}
+}
+
+// WithAccounts 可选挂载连接/账户服务（账户注册表 CRUD）。
+func (s *ApiServer) WithAccounts(a store.AccountStore) *ApiServer {
+	s.accounts = a
+	return s
 }
 
 // WithAIGateway 可选挂载 AI 能力路由网关（ADR-010）。非破坏性：未调用则无 /api/ai/chat 路由。
@@ -52,6 +59,7 @@ func (s *ApiServer) Handler() http.Handler {
 	mux.HandleFunc("/api/mails/{id}", s.handleMailByID)
 	mux.HandleFunc("/api/mails/{id}/read", s.handleSetRead)
 	mux.HandleFunc("/api/accounts", s.handleAccounts)
+	mux.HandleFunc("/api/accounts/{id}", s.handleAccountByID)
 	mux.HandleFunc("/api/search", s.handleSearch)
 	if s.gw != nil {
 		mux.HandleFunc("/api/ai/chat", s.handleAIChat)
@@ -207,12 +215,58 @@ func (s *ApiServer) handleSetRead(w http.ResponseWriter, r *http.Request) {
 
 // handleAccounts 返回当前租户内已种子/已写入邮件的账户列表（含未读数），
 // 供前端渲染账户切换 chips 与未读徽标，避免前后端账户集合漂移。
+// handleAccounts 账户列表：
+//   GET /api/accounts —— 挂载账户服务时返回注册表（含 provider/email/status + 未读数）；
+//   否则回退「按 mail_metadata 去重推导」的兼容路径。
+//   POST /api/accounts —— 新建账户（连接/账户服务），body: {id, provider, email, displayName, status, syncFolder, credentialsRef}
 func (s *ApiServer) handleAccounts(w http.ResponseWriter, r *http.Request) {
+	tid := tenant.FromRequest(r).TenantID
+	if r.Method == http.MethodPost {
+		if s.accounts == nil {
+			writeJSON(w, 501, map[string]any{"error": "account service not mounted"})
+			return
+		}
+		var a model.Account
+		if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+			writeJSON(w, 400, map[string]any{"error": "bad request: " + err.Error()})
+			return
+		}
+		if msg := a.Valid(); msg != "" {
+			writeJSON(w, 400, map[string]any{"error": msg})
+			return
+		}
+		if err := s.accounts.CreateAccount(tid, a); err != nil {
+			writeJSON(w, 409, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 201, a)
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeJSON(w, 405, map[string]any{"error": "method not allowed"})
 		return
 	}
-	tid := tenant.FromRequest(r).TenantID
+
+	if s.accounts != nil {
+		list, err := s.accounts.ListAccounts(tid)
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": err.Error()})
+			return
+		}
+		accounts := make([]map[string]any, 0, len(list))
+		for _, a := range list {
+			c, _ := s.metadata.UnreadCount(tid, a.ID)
+			accounts = append(accounts, map[string]any{
+				"id": a.ID, "unread": c, "provider": a.Provider, "email": a.Email,
+				"displayName": a.DisplayName, "status": a.Status, "syncFolder": a.SyncFolder,
+				"lastSyncAt": a.LastSyncAt,
+			})
+		}
+		writeJSON(w, 200, map[string]any{"tenantId": tid, "accounts": accounts})
+		return
+	}
+
+	// 兼容回退：元数据去重推导账户列表
 	ids, err := s.metadata.ListAccounts(tid)
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"error": err.Error()})
@@ -227,6 +281,89 @@ func (s *ApiServer) handleAccounts(w http.ResponseWriter, r *http.Request) {
 		accounts = append(accounts, map[string]any{"id": id, "unread": c})
 	}
 	writeJSON(w, 200, map[string]any{"tenantId": tid, "accounts": accounts})
+}
+
+// handleAccountByID 单账户 CRUD（连接/账户服务）：
+//   GET    /api/accounts/{id} —— 详情
+//   PUT    /api/accounts/{id} —— 更新（status/displayName/syncFolder 等）
+//   DELETE /api/accounts/{id} —— 删除
+func (s *ApiServer) handleAccountByID(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		writeJSON(w, 501, map[string]any{"error": "account service not mounted"})
+		return
+	}
+	tid := tenant.FromRequest(r).TenantID
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, 400, map[string]any{"error": "account id required"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		a, err := s.accounts.GetAccount(tid, id)
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": err.Error()})
+			return
+		}
+		if a == nil {
+			writeJSON(w, 404, map[string]any{"error": "account not found"})
+			return
+		}
+		writeJSON(w, 200, a)
+	case http.MethodPut:
+		var a model.Account
+		if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+			writeJSON(w, 400, map[string]any{"error": "bad request: " + err.Error()})
+			return
+		}
+		a.ID = id
+		existing, err := s.accounts.GetAccount(tid, id)
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": err.Error()})
+			return
+		}
+		if existing == nil {
+			writeJSON(w, 404, map[string]any{"error": "account not found"})
+			return
+		}
+		// 部分更新语义：未显式提供的字段保留原值（先合并再校验，避免只改 status 时被 provider 必填拦截）
+		if a.Provider == "" {
+			a.Provider = existing.Provider
+		}
+		if a.Email == "" {
+			a.Email = existing.Email
+		}
+		if a.DisplayName == "" {
+			a.DisplayName = existing.DisplayName
+		}
+		if a.SyncFolder == "" {
+			a.SyncFolder = existing.SyncFolder
+		}
+		if a.CredentialsRef == "" {
+			a.CredentialsRef = existing.CredentialsRef
+		}
+		if a.Status == "" {
+			a.Status = existing.Status
+		}
+		if msg := a.Valid(); msg != "" {
+			writeJSON(w, 400, map[string]any{"error": msg})
+			return
+		}
+		if err := s.accounts.UpdateAccount(tid, a); err != nil {
+			writeJSON(w, 500, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, a)
+	case http.MethodDelete:
+		if err := s.accounts.DeleteAccount(tid, id); err != nil {
+			writeJSON(w, 404, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "id": id})
+	default:
+		writeJSON(w, 405, map[string]any{"error": "method not allowed"})
+	}
 }
 
 func (s *ApiServer) handleMails(w http.ResponseWriter, r *http.Request) {

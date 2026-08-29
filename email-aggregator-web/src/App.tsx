@@ -1,6 +1,18 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { health, listMails, searchMails, demoPush, listAccounts, getMail, setRead, deleteMail } from './api/client'
-import type { CanonicalMail, SearchHit, NotificationPayload, AccountInfo } from './types'
+import {
+  health,
+  listMails,
+  searchMails,
+  demoPush,
+  listAccounts,
+  getMail,
+  setRead,
+  deleteMail,
+  createAccount,
+  updateAccountStatus,
+  deleteAccount as apiDeleteAccount,
+} from './api/client'
+import type { CanonicalMail, SearchHit, NotificationPayload, AccountInfo, AccountStatus, Provider } from './types'
 import HealthBadge from './components/HealthBadge'
 import SearchBar from './components/SearchBar'
 import MailList from './components/MailList'
@@ -42,6 +54,11 @@ export default function App() {
   const [selectedMail, setSelectedMail] = useState<CanonicalMail | null>(null)
   const [selectedHit, setSelectedHit] = useState<SearchHit | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // 连接/账户服务：添加账户表单状态 + 操作中标志（防重复提交）
+  const [addingAccount, setAddingAccount] = useState(false)
+  const [accForm, setAccForm] = useState({ id: '', provider: 'imap' as Provider, email: '', displayName: '' })
+  const [accountBusy, setAccountBusy] = useState(false)
 
   // 当前账户权威未读数（来自 /api/accounts 注册表，与账户 chip 徽标一致），
   // 替代原先对所有 WS 事件 +1 且不清零的 session 计数器，避免"未读"语义失真。
@@ -245,6 +262,70 @@ export default function App() {
   // 清除检索：返回收件箱视图（保留已加载邮件，仅收起命中列表）
   const clearSearch = useCallback(() => setHits(null), [])
 
+  // 新增账户：提交到连接/账户服务注册表，成功后刷新列表并切换。
+  const addAccount = useCallback(async () => {
+    if (!accForm.id.trim() || !accForm.email.trim()) {
+      setError('账户 ID 与邮箱必填')
+      return
+    }
+    setAccountBusy(true)
+    setError(null)
+    try {
+      await createAccount({
+        id: accForm.id.trim(),
+        provider: accForm.provider,
+        email: accForm.email.trim(),
+        displayName: accForm.displayName.trim() || undefined,
+        status: 'active',
+        syncFolder: 'INBOX',
+      })
+      setAccForm({ id: '', provider: 'imap', email: '', displayName: '' })
+      setAddingAccount(false)
+      setAccountId(accForm.id.trim())
+      refreshAccounts()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAccountBusy(false)
+    }
+  }, [accForm, refreshAccounts])
+
+  // 暂停 / 恢复：仅对注册表已存在的账户生效；被暂停账户将不再参与同步。
+  const togglePause = useCallback(
+    async (acc: AccountInfo) => {
+      const next: AccountStatus = acc.status === 'paused' ? 'active' : 'paused'
+      setAccountBusy(true)
+      setError(null)
+      try {
+        await updateAccountStatus(acc.id, next)
+        refreshAccounts()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setAccountBusy(false)
+      }
+    },
+    [refreshAccounts],
+  )
+
+  // 删除账户：从注册表移除；若删除的是当前账户，切回默认账户。
+  const removeAccount = useCallback(
+    async (acc: AccountInfo) => {
+      setAccountBusy(true)
+      setError(null)
+      try {
+        await apiDeleteAccount(acc.id)
+        if (acc.id === accountId) setAccountId(DEFAULT_ACCOUNT)
+        refreshAccounts()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setAccountBusy(false)
+      }
+    },
+    [accountId, refreshAccounts],
+  )
+
   return (
     <div className="app">
       <header className="app-header">
@@ -266,14 +347,39 @@ export default function App() {
               key={acc.id}
               role="tab"
               aria-selected={acc.id === accountId}
-              className={`account-chip ${acc.id === accountId ? 'active' : ''}`}
+              className={`account-chip ${acc.id === accountId ? 'active' : ''} ${acc.status && acc.status !== 'active' ? `status-${acc.status}` : ''}`}
               onClick={() => setAccountId(acc.id)}
+              title={acc.email ? `${acc.email} · ${acc.provider ?? ''}` : undefined}
             >
               {acc.id}
+              {acc.status && acc.status !== 'active' && (
+                <span className="chip-status">{acc.status === 'paused' ? '暂停' : '异常'}</span>
+              )}
               {acc.unread > 0 && <span className="chip-badge">{acc.unread}</span>}
             </button>
           ))}
         </div>
+        <button
+          onClick={() => setAddingAccount((v) => !v)}
+          className="add-account-btn"
+          aria-expanded={addingAccount}
+        >
+          {addingAccount ? '收起' : '+ 添加账户'}
+        </button>
+        {accounts.find((a) => a.id === accountId) && (
+          <div className="account-actions" aria-label="当前账户操作">
+            <button onClick={() => togglePause(accounts.find((a) => a.id === accountId)!)} disabled={accountBusy}>
+              {accounts.find((a) => a.id === accountId)!.status === 'paused' ? '恢复同步' : '暂停同步'}
+            </button>
+            <button
+              onClick={() => removeAccount(accounts.find((a) => a.id === accountId)!)}
+              disabled={accountBusy}
+              className="danger-btn"
+            >
+              删除账户
+            </button>
+          </div>
+        )}
         <button onClick={loadMails} disabled={loading}>
           {loading ? '加载中…' : '刷新邮件'}
         </button>
@@ -287,6 +393,38 @@ export default function App() {
           </button>
         )}
       </section>
+
+      {addingAccount && (
+        <section className="account-form" aria-label="添加账户">
+          <input
+            placeholder="账户 ID（如 acc_new）"
+            value={accForm.id}
+            onChange={(e) => setAccForm((f) => ({ ...f, id: e.target.value }))}
+          />
+          <select
+            value={accForm.provider}
+            onChange={(e) => setAccForm((f) => ({ ...f, provider: e.target.value as Provider }))}
+          >
+            <option value="imap">IMAP</option>
+            <option value="pop3">POP3</option>
+            <option value="gmail">Gmail</option>
+            <option value="exchange">Exchange</option>
+          </select>
+          <input
+            placeholder="邮箱（如 user@example.com）"
+            value={accForm.email}
+            onChange={(e) => setAccForm((f) => ({ ...f, email: e.target.value }))}
+          />
+          <input
+            placeholder="显示名（可选）"
+            value={accForm.displayName}
+            onChange={(e) => setAccForm((f) => ({ ...f, displayName: e.target.value }))}
+          />
+          <button onClick={addAccount} disabled={accountBusy}>
+            {accountBusy ? '提交中…' : '创建'}
+          </button>
+        </section>
+      )}
 
       {error && <div className="error">错误：{error}</div>}
 

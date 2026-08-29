@@ -73,6 +73,7 @@ type RealAdapters struct {
 	Content  store.ContentStore
 	Index    search.SearchIndex
 	Notifier notify.Notifier
+	Accounts store.AccountStore
 }
 
 // Wire 按配置装配真实适配器。返回后即可与编排器 / API 服务器 / 采集器对接。
@@ -80,6 +81,10 @@ func Wire(ctx context.Context, cfg Config) (*RealAdapters, error) {
 	pg, err := NewPgMetadataStore(ctx, cfg.PGDSN)
 	if err != nil {
 		return nil, fmt.Errorf("pg: %w", err)
+	}
+	accounts, err := NewPgAccountStore(ctx, cfg.PGDSN)
+	if err != nil {
+		return nil, fmt.Errorf("pg accounts: %w", err)
 	}
 	obj, err := NewObjectContentStore(ctx, cfg.ObjectEndpoint, cfg.ObjectBucket,
 		cfg.ObjectAccessKey, cfg.ObjectSecretKey, cfg.ObjectSecure)
@@ -98,6 +103,7 @@ func Wire(ctx context.Context, cfg Config) (*RealAdapters, error) {
 		Content:  obj,
 		Index:    os,
 		Notifier: hub,
+		Accounts: accounts,
 	}, nil
 }
 

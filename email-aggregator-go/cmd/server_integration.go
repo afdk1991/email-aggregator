@@ -25,6 +25,7 @@ import (
 	"email-aggregator-go/src/events"
 	"email-aggregator-go/src/ingest"
 	"email-aggregator-go/src/integration"
+	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/notify"
 	"email-aggregator-go/src/tenant"
 )
@@ -105,9 +106,25 @@ func main() {
 	// 本机多项目并存时（项目002 的 gateway-go 固定占用 8080）需改端口以避免冲突。
 	port := envPort("HTTP_PORT", 8080)
 
-	// REST + WS 同端口（含 AI 网关 /api/ai/chat）
+	// 连接/账户服务：把演示账户种子进注册表（幂等 upsert），保证前端 tab 与账户服务一致。
+	// 演示账户不落明文凭据——credentialsRef 留空，指向后续 Token Vault/KMS 集成（ADR-004）。
+	seedAccounts := []model.Account{
+		{ID: "acc_demo", Provider: model.ProviderIMAP, Email: "demo@example.com", DisplayName: "Demo IMAP", Status: model.AccountActive, SyncFolder: "INBOX"},
+		{ID: "acc_kafka", Provider: model.ProviderIMAP, Email: "kafka@example.com", DisplayName: "Kafka Pipeline", Status: model.AccountActive, SyncFolder: "INBOX"},
+		{ID: "acc_ts", Provider: model.ProviderIMAP, Email: "ts@example.com", DisplayName: "TS Contract", Status: model.AccountActive, SyncFolder: "INBOX"},
+	}
+	for _, a := range seedAccounts {
+		if err := adapters.Accounts.Upsert(tenant.Resolve("default"), a); err != nil {
+			fmt.Printf("[warn] seed account %s: %v\n", a.ID, err)
+		}
+	}
+
+	// REST + WS 同端口（含 AI 网关 /api/ai/chat、账户服务 /api/accounts）
 	mux := http.NewServeMux()
-	mux.Handle("/", api.NewApiServer(adapters.Metadata, adapters.Index, adapters.Notifier, port).WithAIGateway(aiRouter).Handler())
+	mux.Handle("/", api.NewApiServer(adapters.Metadata, adapters.Index, adapters.Notifier, port).
+		WithAIGateway(aiRouter).
+		WithAccounts(adapters.Accounts).
+		Handler())
 
 	// WebSocket 实时推送：通过可选接口断言解耦于具体 Notifier 实现类型。
 	// 任意实现了 Upgrade(w, r, accountID) 的 Notifier 均可挂载；断言失败仅跳过 /ws 路由（不再静默 nil→500）。

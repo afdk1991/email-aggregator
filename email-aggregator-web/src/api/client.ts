@@ -1,10 +1,13 @@
 // 网络层：所有 REST 调用集中在此，页面/组件不直接 fetch。
 // 端点契约来自 email-aggregator-go/src/api/server.go（同源 /api 经 vite 代理到 :8080）。
 import type {
+  AccountInfo,
+  AccountStatus,
   CanonicalMail,
   ChatRequest,
   ChatResponse,
   NotificationPayload,
+  Provider,
   SearchHit,
 } from '../types'
 
@@ -53,15 +56,53 @@ export function searchMails(accountId: string, q: string): Promise<SearchResp> {
 }
 
 // 账户注册表：返回后端已种子账户及各自未读数，驱动前端切换 chips 与未读徽标。
-export interface AccountInfo {
-  id: string
-  unread: number
-}
 export interface AccountsResp {
   accounts: AccountInfo[]
 }
 export function listAccounts(): Promise<AccountsResp> {
   return getJSON<AccountsResp>(`${BASE}/accounts`)
+}
+
+// 新增账户（POST /api/accounts）。
+export interface NewAccountInput {
+  id: string
+  provider: Provider
+  email: string
+  displayName?: string
+  status?: AccountStatus
+  syncFolder?: string
+}
+export async function createAccount(input: NewAccountInput): Promise<AccountInfo> {
+  const r = await fetch(`${BASE}/accounts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!r.ok) {
+    const err = (await r.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error || `HTTP ${r.status}`)
+  }
+  return (await r.json()) as AccountInfo
+}
+
+// 更新账户状态（PUT /api/accounts/{id}，部分更新）。
+export async function updateAccountStatus(accountId: string, status: AccountStatus): Promise<AccountInfo> {
+  const r = await fetch(`${BASE}/accounts/${encodeURIComponent(accountId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: accountId, status }),
+  })
+  if (!r.ok) {
+    const err = (await r.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error || `HTTP ${r.status}`)
+  }
+  return (await r.json()) as AccountInfo
+}
+
+// 删除账户（DELETE /api/accounts/{id}）。
+export async function deleteAccount(accountId: string): Promise<void> {
+  const r = await fetch(`${BASE}/accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE' })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
 }
 
 // setRead 设置邮件已读/未读（POST /api/mails/{id}/read，body {read}）。

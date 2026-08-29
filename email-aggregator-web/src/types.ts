@@ -98,8 +98,16 @@ export interface NotificationPayload {
   read?: boolean
 }
 
-// 账户信息（含未读数），来自 /api/accounts
+// 账户信息（连接/账户服务），来自 /api/accounts
+export type AccountStatus = 'active' | 'paused' | 'error'
+
 export interface AccountInfo {
   id: string
   unread: number
+  provider?: Provider
+  email?: string
+  displayName?: string
+  status?: AccountStatus
+  syncFolder?: string
+  lastSyncAt?: number
 }
