@@ -19,6 +19,7 @@ type Account struct {
 	DisplayName    string        `json:"displayName,omitempty"`
 	Status         AccountStatus `json:"status"`
 	SyncFolder     string        `json:"syncFolder,omitempty"`   // 默认同步文件夹（如 INBOX / Inbox）
+	ServerHost     string        `json:"serverHost,omitempty"`    // 连接端点（imap.139.com:993 等），同步时供连接器解析
 	CredentialsRef string        `json:"credentialsRef,omitempty"` // Token Vault/KMS 引用，非明文
 	LastSyncAt     int64         `json:"lastSyncAt,omitempty"`
 	CreatedAt      int64         `json:"createdAt"`

@@ -88,13 +88,14 @@ $COMPOSE exec -T postgres pg_isready -U "$PG_USER" >/dev/null 2>&1 \
   || { err "PostgreSQL 60s 内未就绪，请检查容器日志：$COMPOSE logs postgres"; exit 1; }
 ok "PostgreSQL 就绪"
 
-info "重放迁移 001_init.sql + 002_citus_sharding.sql + 003_read_flag.sql + 004_account_registry.sql（幂等，可重跑）…"
+info "重放迁移 001_init.sql + 002_citus_sharding.sql + 003_read_flag.sql + 004_account_registry.sql + 005_account_server_host.sql（幂等，可重跑）…"
 # 002 在纯 PG 上会自动跳过 Citus 分片（DO $$ 守卫），不会报错。
 # 003 为存量库补齐 mail_metadata.read 列（ADD COLUMN IF NOT EXISTS），新装库自动跳过。
 # 004 为连接/账户服务建账户注册表 mail_account（CREATE TABLE IF NOT EXISTS）。
+# 005 为账户注册表补连接端点 server_host（ADD COLUMN IF NOT EXISTS），真实邮箱同步用。
 $COMPOSE exec -T postgres psql -U "$PG_USER" -d "$PG_DATABASE" -v ON_ERROR_STOP=1 \
-  -f /migrations/001_init.sql -f /migrations/002_citus_sharding.sql -f /migrations/003_read_flag.sql -f /migrations/004_account_registry.sql \
-  && ok "迁移完成（mail_metadata / account_sync_cursor / read 列 / mail_account 已就绪）" \
+  -f /migrations/001_init.sql -f /migrations/002_citus_sharding.sql -f /migrations/003_read_flag.sql -f /migrations/004_account_registry.sql -f /migrations/005_account_server_host.sql \
+  && ok "迁移完成（mail_metadata / account_sync_cursor / read 列 / mail_account / server_host 已就绪）" \
   || { err "迁移执行失败，详见上方 psql 输出"; exit 1; }
 
 # ── 3) MinIO 建桶 ──

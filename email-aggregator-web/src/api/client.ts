@@ -71,6 +71,7 @@ export interface NewAccountInput {
   displayName?: string
   status?: AccountStatus
   syncFolder?: string
+  serverHost?: string
 }
 export async function createAccount(input: NewAccountInput): Promise<AccountInfo> {
   const r = await fetch(`${BASE}/accounts`, {
@@ -83,6 +84,34 @@ export async function createAccount(input: NewAccountInput): Promise<AccountInfo
     throw new Error(err.error || `HTTP ${r.status}`)
   }
   return (await r.json()) as AccountInfo
+}
+
+// saveAccountCredentials 录入/更新账户凭据（授权码/密码），服务端 KMS 信封加密后存 credentialsRef。
+export async function saveAccountCredentials(
+  accountId: string,
+  username: string,
+  password: string,
+): Promise<void> {
+  const r = await fetch(`${BASE}/accounts/${encodeURIComponent(accountId)}/credentials`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!r.ok) {
+    const err = (await r.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error || `HTTP ${r.status}`)
+  }
+}
+
+// syncAccount 后台触发一次账户真实同步（POST /api/accounts/{id}/sync，202）。
+export async function syncAccount(accountId: string): Promise<void> {
+  const r = await fetch(`${BASE}/accounts/${encodeURIComponent(accountId)}/sync`, {
+    method: 'POST',
+  })
+  if (!r.ok) {
+    const err = (await r.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error || `HTTP ${r.status}`)
+  }
 }
 
 // 更新账户状态（PUT /api/accounts/{id}，部分更新）。

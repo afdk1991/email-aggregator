@@ -4,3 +4,6 @@
 email-agg-server
 *.exe
 *.log
+
+# KMS 密钥库（含主密钥/KEK，敏感凭据，绝不入库）
+**/kms-keyring*.json

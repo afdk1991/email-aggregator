@@ -109,5 +109,8 @@ export interface AccountInfo {
   displayName?: string
   status?: AccountStatus
   syncFolder?: string
+  serverHost?: string
   lastSyncAt?: number
+  syncing?: boolean
+  lastSyncError?: string
 }

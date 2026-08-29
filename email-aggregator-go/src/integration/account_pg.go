@@ -29,15 +29,15 @@ func NewPgAccountStore(_ context.Context, dsn string) (*PgAccountStore, error) {
 	return &PgAccountStore{pool: pool}, nil
 }
 
-const accountCols = `id, tenant_id, provider, email, display_name, status, sync_folder, credentials_ref, last_sync_at, created_at, updated_at`
+const accountCols = `id, tenant_id, provider, email, display_name, status, sync_folder, server_host, credentials_ref, last_sync_at, created_at, updated_at`
 
 func scanAccount(row interface{ Scan(...interface{}) error }) (*model.Account, error) {
 	var a model.Account
-	var provider, tenantID, email, displayName, status, syncFolder, credRef string
+	var provider, tenantID, email, displayName, status, syncFolder, serverHost, credRef string
 	var lastSync int64
 	var createdAt, updatedAt time.Time
 	if err := row.Scan(&a.ID, &tenantID, &provider, &email, &displayName, &status,
-		&syncFolder, &credRef, &lastSync, &createdAt, &updatedAt); err != nil {
+		&syncFolder, &serverHost, &credRef, &lastSync, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	a.TenantID = tenantID
@@ -46,6 +46,7 @@ func scanAccount(row interface{ Scan(...interface{}) error }) (*model.Account, e
 	a.DisplayName = displayName
 	a.Status = model.AccountStatus(status)
 	a.SyncFolder = syncFolder
+	a.ServerHost = serverHost
 	a.CredentialsRef = credRef
 	a.LastSyncAt = lastSync
 	a.CreatedAt = createdAt.UnixMilli()
@@ -58,15 +59,16 @@ func (s *PgAccountStore) Upsert(tenantID string, a model.Account) error {
 	tenantID = tenant.Resolve(tenantID)
 	_, err := s.pool.Exec(context.Background(), `
 		INSERT INTO mail_account
-		  (id, tenant_id, provider, email, display_name, status, sync_folder, credentials_ref, last_sync_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		  (id, tenant_id, provider, email, display_name, status, sync_folder, server_host, credentials_ref, last_sync_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (id) DO UPDATE SET
 		  provider = EXCLUDED.provider, email = EXCLUDED.email,
 		  display_name = EXCLUDED.display_name, status = EXCLUDED.status,
-		  sync_folder = EXCLUDED.sync_folder, credentials_ref = EXCLUDED.credentials_ref,
+		  sync_folder = EXCLUDED.sync_folder, server_host = EXCLUDED.server_host,
+		  credentials_ref = EXCLUDED.credentials_ref,
 		  last_sync_at = EXCLUDED.last_sync_at, updated_at = now()`,
 		a.ID, tenantID, string(a.Provider), a.Email, a.DisplayName, string(a.Status),
-		a.SyncFolder, a.CredentialsRef, a.LastSyncAt)
+		a.SyncFolder, a.ServerHost, a.CredentialsRef, a.LastSyncAt)
 	return err
 }
 
@@ -107,10 +109,10 @@ func (s *PgAccountStore) CreateAccount(tenantID string, a model.Account) error {
 	tenantID = tenant.Resolve(tenantID)
 	_, err := s.pool.Exec(context.Background(), `
 		INSERT INTO mail_account
-		  (id, tenant_id, provider, email, display_name, status, sync_folder, credentials_ref, last_sync_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		  (id, tenant_id, provider, email, display_name, status, sync_folder, server_host, credentials_ref, last_sync_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 		a.ID, tenantID, string(a.Provider), a.Email, a.DisplayName, string(a.Status),
-		a.SyncFolder, a.CredentialsRef, a.LastSyncAt)
+		a.SyncFolder, a.ServerHost, a.CredentialsRef, a.LastSyncAt)
 	return err
 }
 
@@ -119,10 +121,10 @@ func (s *PgAccountStore) UpdateAccount(tenantID string, a model.Account) error {
 	tenantID = tenant.Resolve(tenantID)
 	_, err := s.pool.Exec(context.Background(), `
 		UPDATE mail_account SET provider=$3, email=$4, display_name=$5, status=$6,
-		  sync_folder=$7, credentials_ref=$8, last_sync_at=$9, updated_at=now()
+		  sync_folder=$7, server_host=$8, credentials_ref=$9, last_sync_at=$10, updated_at=now()
 		WHERE id=$1 AND tenant_id=$2`,
 		a.ID, tenantID, string(a.Provider), a.Email, a.DisplayName, string(a.Status),
-		a.SyncFolder, a.CredentialsRef, a.LastSyncAt)
+		a.SyncFolder, a.ServerHost, a.CredentialsRef, a.LastSyncAt)
 	return err
 }
 

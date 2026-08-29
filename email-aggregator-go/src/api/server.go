@@ -13,9 +13,28 @@ import (
 	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/notify"
 	"email-aggregator-go/src/search"
+	"email-aggregator-go/src/security"
 	"email-aggregator-go/src/store"
 	"email-aggregator-go/src/tenant"
 )
+
+// AccountSyncer 账户实时同步执行器（由 cmd 装配：bus + vault + 账户注册表 + 连接器工厂）。
+// 它只面向「手动触发一次真实同步」的运维入口；后台调度仍走 sync-tasks 事件总线。
+type AccountSyncer interface {
+	// StartSync 后台启动一次真实同步（立即返回）；已运行中/未配置凭据时返回错误。
+	StartSync(tid, accountID string) error
+	// SyncStatus 返回最近一次同步状态（running/ok/pulled/error）。
+	SyncStatus(tid, accountID string) SyncStatus
+}
+
+// SyncStatus 账户同步状态（对外 JSON 契约）。
+type SyncStatus struct {
+	Running bool   `json:"running"`
+	OK      bool   `json:"ok,omitempty"`
+	Pulled  int    `json:"pulled,omitempty"`
+	Error   string `json:"error,omitempty"`
+	TS      int64  `json:"ts,omitempty"`
+}
 
 // ApiServer 依赖装配
 type ApiServer struct {
@@ -25,6 +44,8 @@ type ApiServer struct {
 	gw       *aigateway.Router   // 可选：AI 能力路由网关（ADR-010）
 	wsHub    *notify.Hub         // 可选：WebSocket 实时推送（零依赖 Hub）
 	accounts store.AccountStore  // 可选：连接/账户服务（未挂载时 /api/accounts 回退元数据推导）
+	vault    *security.CredentialVault // 可选：凭据保险库（开启 /api/accounts/{id}/credentials）
+	syncer   AccountSyncer       // 可选：账户同步执行器（开启 /api/accounts/{id}/sync）
 	port     int
 }
 
@@ -36,6 +57,18 @@ func NewApiServer(metadata store.MetadataStore, idx search.SearchIndex, notifier
 // WithAccounts 可选挂载连接/账户服务（账户注册表 CRUD）。
 func (s *ApiServer) WithAccounts(a store.AccountStore) *ApiServer {
 	s.accounts = a
+	return s
+}
+
+// WithCredentialVault 可选挂载凭据保险库（开启 POST /api/accounts/{id}/credentials，KMS 信封加密录入）。
+func (s *ApiServer) WithCredentialVault(v *security.CredentialVault) *ApiServer {
+	s.vault = v
+	return s
+}
+
+// WithAccountSyncer 可选挂载账户同步执行器（开启 POST/GET /api/accounts/{id}/sync）。
+func (s *ApiServer) WithAccountSyncer(syn AccountSyncer) *ApiServer {
+	s.syncer = syn
 	return s
 }
 
@@ -60,6 +93,8 @@ func (s *ApiServer) Handler() http.Handler {
 	mux.HandleFunc("/api/mails/{id}/read", s.handleSetRead)
 	mux.HandleFunc("/api/accounts", s.handleAccounts)
 	mux.HandleFunc("/api/accounts/{id}", s.handleAccountByID)
+	mux.HandleFunc("/api/accounts/{id}/credentials", s.handleAccountCredentials)
+	mux.HandleFunc("/api/accounts/{id}/sync", s.handleAccountSync)
 	mux.HandleFunc("/api/search", s.handleSearch)
 	if s.gw != nil {
 		mux.HandleFunc("/api/ai/chat", s.handleAIChat)
@@ -256,11 +291,19 @@ func (s *ApiServer) handleAccounts(w http.ResponseWriter, r *http.Request) {
 		accounts := make([]map[string]any, 0, len(list))
 		for _, a := range list {
 			c, _ := s.metadata.UnreadCount(tid, a.ID)
-			accounts = append(accounts, map[string]any{
+			item := map[string]any{
 				"id": a.ID, "unread": c, "provider": a.Provider, "email": a.Email,
 				"displayName": a.DisplayName, "status": a.Status, "syncFolder": a.SyncFolder,
-				"lastSyncAt": a.LastSyncAt,
-			})
+				"serverHost": a.ServerHost, "lastSyncAt": a.LastSyncAt,
+			}
+			if s.syncer != nil {
+				st := s.syncer.SyncStatus(tid, a.ID)
+				item["syncing"] = st.Running
+				if st.Error != "" {
+					item["lastSyncError"] = st.Error
+				}
+			}
+			accounts = append(accounts, item)
 		}
 		writeJSON(w, 200, map[string]any{"tenantId": tid, "accounts": accounts})
 		return
@@ -340,6 +383,9 @@ func (s *ApiServer) handleAccountByID(w http.ResponseWriter, r *http.Request) {
 		if a.SyncFolder == "" {
 			a.SyncFolder = existing.SyncFolder
 		}
+		if a.ServerHost == "" {
+			a.ServerHost = existing.ServerHost
+		}
 		if a.CredentialsRef == "" {
 			a.CredentialsRef = existing.CredentialsRef
 		}
@@ -361,6 +407,101 @@ func (s *ApiServer) handleAccountByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true, "id": id})
+	default:
+		writeJSON(w, 405, map[string]any{"error": "method not allowed"})
+	}
+}
+
+// handleAccountCredentials 录入/更新账户凭据（KMS 信封加密，ADR-004）：
+//   POST /api/accounts/{id}/credentials —— body: {username?, password}
+//   用户名缺省用账户 email；明文经 CredentialVault.Seal 加密后以 envelope JSON 存入 credentialsRef，
+//   明文零落盘。同步时由执行器 Unseal 还原。
+func (s *ApiServer) handleAccountCredentials(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if s.accounts == nil {
+		writeJSON(w, 501, map[string]any{"error": "account service not mounted"})
+		return
+	}
+	if s.vault == nil {
+		writeJSON(w, 501, map[string]any{"error": "credential vault not mounted"})
+		return
+	}
+	tid := tenant.FromRequest(r).TenantID
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, 400, map[string]any{"error": "account id required"})
+		return
+	}
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]any{"error": "bad request: " + err.Error()})
+		return
+	}
+	if body.Password == "" {
+		writeJSON(w, 400, map[string]any{"error": "password (授权码/密码) required"})
+		return
+	}
+	acct, err := s.accounts.GetAccount(tid, id)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": err.Error()})
+		return
+	}
+	if acct == nil {
+		writeJSON(w, 404, map[string]any{"error": "account not found"})
+		return
+	}
+	username := body.Username
+	if username == "" {
+		username = acct.Email
+	}
+	payload, _ := json.Marshal(map[string]string{"username": username, "password": body.Password})
+	env, err := s.vault.Seal(r.Context(), payload)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "seal credentials: " + err.Error()})
+		return
+	}
+	envJSON, _ := json.Marshal(env)
+	acct.CredentialsRef = string(envJSON)
+	if err := s.accounts.UpdateAccount(tid, *acct); err != nil {
+		writeJSON(w, 500, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "id": id, "credentialsRef": acct.CredentialsRef})
+}
+
+// handleAccountSync 手动触发/查询账户真实同步：
+//   POST /api/accounts/{id}/sync —— 后台启动一次真实同步（全量），立即返回 202
+//   GET  /api/accounts/{id}/sync —— 返回最近一次同步状态（running/ok/pulled/error）
+func (s *ApiServer) handleAccountSync(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		writeJSON(w, 501, map[string]any{"error": "account service not mounted"})
+		return
+	}
+	if s.syncer == nil {
+		writeJSON(w, 501, map[string]any{"error": "account syncer not mounted"})
+		return
+	}
+	tid := tenant.FromRequest(r).TenantID
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, 400, map[string]any{"error": "account id required"})
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		if err := s.syncer.StartSync(tid, id); err != nil {
+			writeJSON(w, 409, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 202, map[string]any{"ok": true, "id": id, "started": true})
+	case http.MethodGet:
+		writeJSON(w, 200, s.syncer.SyncStatus(tid, id))
 	default:
 		writeJSON(w, 405, map[string]any{"error": "method not allowed"})
 	}

@@ -22,6 +22,7 @@ import (
 
 	"email-aggregator-go/src/aigateway"
 	"email-aggregator-go/src/api"
+	"email-aggregator-go/src/connector"
 	"email-aggregator-go/src/events"
 	"email-aggregator-go/src/ingest"
 	"email-aggregator-go/src/integration"
@@ -108,23 +109,35 @@ func main() {
 
 	// 连接/账户服务：把演示账户种子进注册表（幂等 upsert），保证前端 tab 与账户服务一致。
 	// 演示账户不落明文凭据——credentialsRef 留空，指向后续 Token Vault/KMS 集成（ADR-004）。
+	// acc_139 为真实邮箱接入点：server_host=imap.139.com:993，凭据经「设凭据」接口信封加密录入。
 	seedAccounts := []model.Account{
 		{ID: "acc_demo", Provider: model.ProviderIMAP, Email: "demo@example.com", DisplayName: "Demo IMAP", Status: model.AccountActive, SyncFolder: "INBOX"},
 		{ID: "acc_kafka", Provider: model.ProviderIMAP, Email: "kafka@example.com", DisplayName: "Kafka Pipeline", Status: model.AccountActive, SyncFolder: "INBOX"},
 		{ID: "acc_ts", Provider: model.ProviderIMAP, Email: "ts@example.com", DisplayName: "TS Contract", Status: model.AccountActive, SyncFolder: "INBOX"},
 		{ID: "acc_graph", Provider: model.ProviderGraph, Email: "graph@m365.example.com", DisplayName: "M365 Graph", Status: model.AccountActive, SyncFolder: "INBOX"},
+		{ID: "acc_139", Provider: model.ProviderIMAP, Email: "15726833367@139.com", DisplayName: "139 邮箱", Status: model.AccountActive, SyncFolder: "INBOX", ServerHost: "imap.139.com:993"},
 	}
 	for _, a := range seedAccounts {
+		// 幂等种子但「已存在即跳过」：不覆盖用户录入的凭据/状态/连接端点，
+		// 避免每次重启把真实邮箱的 credentialsRef（KMS 信封）冲掉。
+		if existing, err := adapters.Accounts.GetAccount(tenant.Resolve("default"), a.ID); err == nil && existing != nil {
+			continue
+		}
 		if err := adapters.Accounts.Upsert(tenant.Resolve("default"), a); err != nil {
 			fmt.Printf("[warn] seed account %s: %v\n", a.ID, err)
 		}
 	}
 
-	// REST + WS 同端口（含 AI 网关 /api/ai/chat、账户服务 /api/accounts）
+	// 账户真实同步执行器：手动「立即同步」走 连接器注册表 + Vault 拆封凭据 + 编排器。
+	syncer := newAccountSyncer(adapters.Bus, vault, adapters.Accounts, connector.NewDefaultRegistry())
+
+	// REST + WS 同端口（含 AI 网关 /api/ai/chat、账户服务 /api/accounts、凭据/同步入口）
 	mux := http.NewServeMux()
 	mux.Handle("/", api.NewApiServer(adapters.Metadata, adapters.Index, adapters.Notifier, port).
 		WithAIGateway(aiRouter).
 		WithAccounts(adapters.Accounts).
+		WithCredentialVault(vault).
+		WithAccountSyncer(syncer).
 		Handler())
 
 	// WebSocket 实时推送：通过可选接口断言解耦于具体 Notifier 实现类型。

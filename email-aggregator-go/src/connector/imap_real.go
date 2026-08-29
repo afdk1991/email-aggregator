@@ -44,7 +44,11 @@ type RealIMAPConnector struct {
 // useTLS=false 时按 CAPABILITY 自动 STARTTLS 升级（如 143 端口）。
 func NewRealIMAPConnector(addr string, useTLS bool, tlsCfg *tls.Config) *RealIMAPConnector {
 	if tlsCfg == nil {
-		tlsCfg = &tls.Config{ServerName: hostOf(addr)}
+		tlsCfg = &tls.Config{}
+	}
+	if tlsCfg.ServerName == "" {
+		// 显式 SNI / 校验名兜底：即使调用方传入自定义 TLS 配置（如封顶版本）也保证校验正确
+		tlsCfg.ServerName = hostOf(addr)
 	}
 	return &RealIMAPConnector{
 		addr:    addr,

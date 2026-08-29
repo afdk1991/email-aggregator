@@ -51,6 +51,13 @@ type RealPOP3Connector struct {
 // NewRealPOP3Connector 构造真实 POP3 连接器。
 // addr 形如 "pop3.example.com:110"；useTLS=true 时建立隐式 TLS 连接（如 995 端口）。
 func NewRealPOP3Connector(addr string, useTLS bool, tlsCfg *tls.Config) *RealPOP3Connector {
+	if tlsCfg == nil {
+		tlsCfg = &tls.Config{}
+	}
+	if tlsCfg.ServerName == "" {
+		// 显式 SNI / 校验名兜底：与 IMAP 一致，保证自定义 TLS 配置（如封顶版本）下校验正确
+		tlsCfg.ServerName = hostOf(addr)
+	}
 	return &RealPOP3Connector{
 		addr:         addr,
 		useTLS:       useTLS,

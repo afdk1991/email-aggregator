@@ -175,7 +175,7 @@ func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskE
 			_ = o.deps.Accounts.Upsert(tenant.Resolve(task.TenantID), model.Account{
 				ID: task.AccountID, Provider: acct.Provider, Email: acct.Email,
 				DisplayName: acct.DisplayName, Status: acct.Status, SyncFolder: acct.SyncFolder,
-				CredentialsRef: acct.CredentialsRef, LastSyncAt: time.Now().UnixMilli(),
+				ServerHost: acct.ServerHost, CredentialsRef: acct.CredentialsRef, LastSyncAt: time.Now().UnixMilli(),
 			})
 		}
 	}

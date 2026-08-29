@@ -11,6 +11,8 @@ import {
   createAccount,
   updateAccountStatus,
   deleteAccount as apiDeleteAccount,
+  saveAccountCredentials,
+  syncAccount,
 } from './api/client'
 import type { CanonicalMail, SearchHit, NotificationPayload, AccountInfo, AccountStatus, Provider } from './types'
 import HealthBadge from './components/HealthBadge'
@@ -57,8 +59,15 @@ export default function App() {
 
   // 连接/账户服务：添加账户表单状态 + 操作中标志（防重复提交）
   const [addingAccount, setAddingAccount] = useState(false)
-  const [accForm, setAccForm] = useState({ id: '', provider: 'imap' as Provider, email: '', displayName: '' })
+  const [accForm, setAccForm] = useState({ id: '', provider: 'imap' as Provider, email: '', displayName: '', serverHost: '' })
   const [accountBusy, setAccountBusy] = useState(false)
+
+  // 真实邮箱凭据录入（授权码/密码 → 服务端 KMS 信封加密）
+  const [credForm, setCredForm] = useState<{ open: boolean; username: string; password: string }>({
+    open: false,
+    username: '',
+    password: '',
+  })
 
   // 当前账户权威未读数（来自 /api/accounts 注册表，与账户 chip 徽标一致），
   // 替代原先对所有 WS 事件 +1 且不清零的 session 计数器，避免"未读"语义失真。
@@ -278,8 +287,9 @@ export default function App() {
         displayName: accForm.displayName.trim() || undefined,
         status: 'active',
         syncFolder: 'INBOX',
+        serverHost: accForm.serverHost.trim() || undefined,
       })
-      setAccForm({ id: '', provider: 'imap', email: '', displayName: '' })
+      setAccForm({ id: '', provider: 'imap', email: '', displayName: '', serverHost: '' })
       setAddingAccount(false)
       setAccountId(accForm.id.trim())
       refreshAccounts()
@@ -326,6 +336,60 @@ export default function App() {
     [accountId, refreshAccounts],
   )
 
+  // 保存账户凭据（授权码/密码）：服务端信封加密后存 credentialsRef，用于真实同步。
+  const saveCreds = useCallback(
+    async (acc: AccountInfo) => {
+      if (!credForm.password.trim()) {
+        setError('授权码/密码必填')
+        return
+      }
+      setAccountBusy(true)
+      setError(null)
+      try {
+        await saveAccountCredentials(acc.id, credForm.username.trim() || acc.email || '', credForm.password)
+        setCredForm({ open: false, username: '', password: '' })
+        refreshAccounts()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setAccountBusy(false)
+      }
+    },
+    [credForm, refreshAccounts],
+  )
+
+  // 立即同步：后台触发一次账户真实同步（连接器 → mail-ingested → 摄取管线）。
+  const triggerSync = useCallback(
+    async (acc: AccountInfo) => {
+      setError(null)
+      try {
+        await syncAccount(acc.id)
+        // 轮询同步状态：running → ok/error
+        let tries = 0
+        const poll = window.setInterval(async () => {
+          tries++
+          try {
+            const resp = await listAccounts()
+            const cur = resp.accounts.find((a) => a.id === acc.id)
+            if (cur?.syncing) return
+            window.clearInterval(poll)
+            if (cur?.lastSyncError) {
+              setError(`同步失败：${cur.lastSyncError}`)
+            } else {
+              refreshAccounts()
+              loadMails()
+            }
+          } catch {
+            if (tries > 60) window.clearInterval(poll)
+          }
+        }, 1000)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [refreshAccounts, loadMails],
+  )
+
   return (
     <div className="app">
       <header className="app-header">
@@ -368,6 +432,25 @@ export default function App() {
         </button>
         {accounts.find((a) => a.id === accountId) && (
           <div className="account-actions" aria-label="当前账户操作">
+            <button
+              onClick={() => triggerSync(accounts.find((a) => a.id === accountId)!)}
+              disabled={accountBusy || !!accounts.find((a) => a.id === accountId)?.syncing}
+              className="sync-btn"
+            >
+              {accounts.find((a) => a.id === accountId)?.syncing ? '同步中…' : '立即同步'}
+            </button>
+            <button
+              onClick={() =>
+                setCredForm((f) => ({
+                  open: !f.open,
+                  username: f.open ? '' : (accounts.find((a) => a.id === accountId)?.email ?? ''),
+                  password: '',
+                }))
+              }
+              disabled={accountBusy}
+            >
+              {credForm.open ? '收起凭据' : '设凭据'}
+            </button>
             <button onClick={() => togglePause(accounts.find((a) => a.id === accountId)!)} disabled={accountBusy}>
               {accounts.find((a) => a.id === accountId)!.status === 'paused' ? '恢复同步' : '暂停同步'}
             </button>
@@ -380,6 +463,37 @@ export default function App() {
             </button>
           </div>
         )}
+        {(() => {
+          const cur = accounts.find((a) => a.id === accountId)
+          if (!cur) return null
+          return (
+            <>
+              {credForm.open && (
+                <div className="cred-form" aria-label="设置凭据">
+                  <input
+                    placeholder="用户名（授权码登录账号，缺省用邮箱）"
+                    value={credForm.username}
+                    onChange={(e) => setCredForm((f) => ({ ...f, username: e.target.value }))}
+                  />
+                  <input
+                    type="password"
+                    placeholder="授权码 / 密码"
+                    value={credForm.password}
+                    onChange={(e) => setCredForm((f) => ({ ...f, password: e.target.value }))}
+                  />
+                  <button onClick={() => saveCreds(cur)} disabled={accountBusy}>
+                    保存凭据
+                  </button>
+                </div>
+              )}
+              {cur.lastSyncError && !cur.syncing && (
+                <span className="sync-error" title={cur.lastSyncError}>
+                  ⚠ 上次同步失败
+                </span>
+              )}
+            </>
+          )
+        })()}
         <button onClick={loadMails} disabled={loading}>
           {loading ? '加载中…' : '刷新邮件'}
         </button>
@@ -420,6 +534,11 @@ export default function App() {
             placeholder="显示名（可选）"
             value={accForm.displayName}
             onChange={(e) => setAccForm((f) => ({ ...f, displayName: e.target.value }))}
+          />
+          <input
+            placeholder="服务器（可选，如 imap.139.com:993）"
+            value={accForm.serverHost}
+            onChange={(e) => setAccForm((f) => ({ ...f, serverHost: e.target.value }))}
           />
           <button onClick={addAccount} disabled={accountBusy}>
             {accountBusy ? '提交中…' : '创建'}
