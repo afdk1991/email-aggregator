@@ -8,8 +8,7 @@
 
 ## 1. 设计原则：默认构建零依赖
 
-仓库默认 `go build ./...` / `go test ./...` **只含标准库**，因此本开发机（无 Go 工具链、
-无外网拉包）也能保持 `go.mod` 干净、可自检。
+仓库默认 `go build ./...` / `go test ./...` **只含标准库**，因此本开发机（~~无 Go 工具链、无外网拉包~~ **更新（2026-08-29）：已装 Go 1.26.6，依赖经 goproxy.cn 镜像可拉取**）也能保持 `go.mod` 干净、可自检。
 
 真实适配器集中在 `src/integration/integration.go` 与 `cmd/server_integration.go`，
 两者均用构建标签保护：
