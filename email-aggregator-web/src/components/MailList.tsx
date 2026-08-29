@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { CanonicalMail, SearchHit } from '../types'
 
 interface Props {
@@ -16,6 +17,15 @@ function fmtDate(ts: number): string {
 }
 
 export default function MailList({ mails, hits, loading, onSelectMail, onSelectHit }: Props) {
+  // 收件箱排序：未读上移、已读下移（稳定排序 → 组内保持服务端原顺序）。
+  // 任何已读状态变更（打开即读 / 详情切换 / WS mail-updated）都会更新 mails 触发本 memo 重算，
+  // 已读邮件自动下移、未读邮件自动上移。检索命中不排序（保持相关性顺序）。
+  const sorted = useMemo(() => {
+    const list = mails ?? []
+    if (list.length === 0) return list
+    return [...list].sort((a, b) => (a.read ? 1 : 0) - (b.read ? 1 : 0))
+  }, [mails])
+
   if (hits) {
     if (hits.length === 0) return <p className="empty">无检索命中</p>
     return (
@@ -42,11 +52,10 @@ export default function MailList({ mails, hits, loading, onSelectMail, onSelectH
     )
   }
 
-  const list = mails ?? []
-  if (list.length === 0) return <p className="empty">{loading ? '加载中…' : '暂无邮件'}</p>
+  if (sorted.length === 0) return <p className="empty">{loading ? '加载中…' : '暂无邮件'}</p>
   return (
       <ul className="mail-list">
-        {list.map((m) => (
+        {sorted.map((m) => (
           <li
             key={m.id}
             className={`mail-item clickable ${m.read ? '' : 'unread'}`}

@@ -130,11 +130,11 @@ func (s *PgMetadataStore) UpsertMail(tenantID string, m model.CanonicalMail) err
 	tenantID = tenant.Resolve(tenantID)
 	_, err := s.pool.Exec(context.Background(), `
 		INSERT INTO mail_metadata
-		  (id, tenant_id, account_id, provider, folder, subject, from_addr, body_text, internal_date, size_bytes, raw_object_key, cursor_json)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		  (id, tenant_id, account_id, provider, folder, subject, from_addr, body_text, internal_date, size_bytes, raw_object_key, cursor_json, read)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (id) DO NOTHING`,
 		m.ID, tenantID, m.AccountID, string(m.Provider), m.Folder, m.Subject,
-		m.From.Email, m.BodyText, m.InternalDate, m.SizeBytes, m.RawObjectKey, cursorJSON(m.Cursor))
+		m.From.Email, m.BodyText, m.InternalDate, m.SizeBytes, m.RawObjectKey, cursorJSON(m.Cursor), m.Read)
 	return err
 }
 
@@ -142,7 +142,7 @@ func (s *PgMetadataStore) UpsertMail(tenantID string, m model.CanonicalMail) err
 func (s *PgMetadataStore) GetMail(tenantID, accountID, id string) (*model.CanonicalMail, error) {
 	tenantID = tenant.Resolve(tenantID)
 	row := s.pool.QueryRow(context.Background(),
-		`SELECT id,tenant_id,account_id,provider,folder,subject,from_addr,body_text,internal_date,size_bytes,raw_object_key,cursor_json
+		`SELECT id,tenant_id,account_id,provider,folder,subject,from_addr,body_text,internal_date,size_bytes,raw_object_key,cursor_json,read
 		 FROM mail_metadata WHERE id=$1 AND account_id=$2 AND tenant_id=$3`, id, accountID, tenantID)
 	return scanMail(row)
 }
@@ -151,7 +151,7 @@ func (s *PgMetadataStore) GetMail(tenantID, accountID, id string) (*model.Canoni
 func (s *PgMetadataStore) ListMails(tenantID, accountID, folder string, limit int) ([]model.CanonicalMail, error) {
 	tenantID = tenant.Resolve(tenantID)
 	rows, err := s.pool.Query(context.Background(),
-		`SELECT id,tenant_id,account_id,provider,folder,subject,from_addr,body_text,internal_date,size_bytes,raw_object_key,cursor_json
+		`SELECT id,tenant_id,account_id,provider,folder,subject,from_addr,body_text,internal_date,size_bytes,raw_object_key,cursor_json,read
 		 FROM mail_metadata WHERE account_id=$1 AND folder=$2 AND tenant_id=$3
 		 ORDER BY internal_date DESC LIMIT $4`, accountID, folder, tenantID, limit)
 	if err != nil {
@@ -263,7 +263,7 @@ func scanMail(row interface {
 	var m model.CanonicalMail
 	var provider, tenantID, fromAddr, rawCursor string
 	if err := row.Scan(&m.ID, &tenantID, &m.AccountID, &provider, &m.Folder, &m.Subject,
-		&fromAddr, &m.BodyText, &m.InternalDate, &m.SizeBytes, &m.RawObjectKey, &rawCursor); err != nil {
+		&fromAddr, &m.BodyText, &m.InternalDate, &m.SizeBytes, &m.RawObjectKey, &rawCursor, &m.Read); err != nil {
 		return nil, err
 	}
 	m.TenantID = tenantID

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS mail_metadata (
     size_bytes      BIGINT      DEFAULT 0,
     raw_object_key  TEXT,
     cursor_json     JSONB,
+    read            BOOLEAN     NOT NULL DEFAULT FALSE,  -- 用户已读状态（前端已读/未读分组排序依据）
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -53,6 +54,7 @@ COMMENT ON COLUMN mail_metadata.tenant_id IS 'ADR-009 逻辑多租户隔离键�
 COMMENT ON COLUMN mail_metadata.id     IS '协议级稳定标识（IMAP: accountId:folder:uid；Exchange: itemId）';
 COMMENT ON COLUMN mail_metadata.raw_object_key IS '对象存储引用键（mail/<sha256>，指向 MinIO/S3 中的邮件原文）';
 COMMENT ON COLUMN mail_metadata.cursor_json    IS '采集时的游标快照（UIDValidity/UIDNext/ModSeq 等，协议相关）';
+COMMENT ON COLUMN mail_metadata.read           IS '用户已读状态（前端按已读/未读分组排序；read IS NULL 视为未读）';
 
 COMMENT ON TABLE  account_sync_cursor       IS '同步断点续传游标（ADR-005 多协议归一化；ADR-009 多租户）';
 COMMENT ON COLUMN account_sync_cursor.tenant_id IS 'ADR-009 逻辑多租户隔离键';
