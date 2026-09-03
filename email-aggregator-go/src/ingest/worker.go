@@ -20,6 +20,7 @@ import (
 	"email-aggregator-go/src/events"
 	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/notify"
+	"email-aggregator-go/src/observ"
 	"email-aggregator-go/src/search"
 	"email-aggregator-go/src/store"
 	"email-aggregator-go/src/tenant"
@@ -64,6 +65,7 @@ func (w *IngestWorker) handle(ctx context.Context, env events.EventEnvelope) err
 
 	// ADR-009：从事件透传 TenantID，旧事件缺省回退 DefaultTenantID
 	tid := tenant.Resolve(ev.TenantID)
+	start := time.Now()
 
 	// 由事件重建 CanonicalMail（事件已携带索引所需字段）。
 	mail := model.CanonicalMail{
@@ -83,16 +85,22 @@ func (w *IngestWorker) handle(ctx context.Context, env events.EventEnvelope) err
 
 	// 1) 元数据落库（幂等：同 (tid, ID) 重复摄取不新增）
 	if err := w.metadata.UpsertMail(tid, mail); err != nil {
+		observ.IngestTotal.Inc(map[string]string{"tenant": tid, "account": ev.AccountID, "status": "error"})
+		observ.Error(ctx, "ingest upsert mail failed", "account", ev.AccountID, "err", err.Error())
 		return err
 	}
 
 	// 2) 正文内容寻址落对象存储（相同正文只存一份）
 	if _, err := w.content.Put([]byte(ev.BodyText)); err != nil {
+		observ.IngestTotal.Inc(map[string]string{"tenant": tid, "account": ev.AccountID, "status": "error"})
+		observ.Error(ctx, "ingest content store failed", "account", ev.AccountID, "err", err.Error())
 		return err
 	}
 
 	// 3) 索引（按 tid 隔离命名空间）
 	if err := w.index.Index(tid, mail); err != nil {
+		observ.IngestTotal.Inc(map[string]string{"tenant": tid, "account": ev.AccountID, "status": "error"})
+		observ.Error(ctx, "ingest index failed", "account", ev.AccountID, "err", err.Error())
 		return err
 	}
 
@@ -128,6 +136,10 @@ func (w *IngestWorker) handle(ctx context.Context, env events.EventEnvelope) err
 		_ = w.bus.Publish(ctx, events.TopicAudit, tid, b)
 	}
 
+	elapsedMs := float64(time.Since(start).Milliseconds())
+	observ.IngestTotal.Inc(map[string]string{"tenant": tid, "account": ev.AccountID, "status": "ok"})
+	observ.IngestDurationMs.Observe(map[string]string{"tenant": tid, "account": ev.AccountID}, elapsedMs)
+	observ.Info(ctx, "mail ingested", "account", ev.AccountID, "mailId", ev.MailID, "elapsedMs", elapsedMs)
 	return nil
 }
 

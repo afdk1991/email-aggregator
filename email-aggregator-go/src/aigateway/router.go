@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"time"
+
+	"email-aggregator-go/src/observ"
 )
 
 // RouteDecision 路由决策结果。
@@ -77,9 +80,26 @@ func NewRouter(selfHosted, thirdParty AIProvider, redactor Redactor, auditSink f
 	return &Router{providers: m, redactor: redactor, auditSink: auditSink}
 }
 
+// b2s 布尔转 "true"/"false"（埋点标签需字符串值）。
+func b2s(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // RouteAndChat 执行 路由 + Guardrail + 审计，返回结果（失败由调用方接 DLQ/退避）。
 func (r *Router) RouteAndChat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	dec := Decide(req.TenantTier, req.Sensitivity, req.UserConsented)
+
+	// 统一埋点（对齐蓝图 §8 / §17：AI 调用延迟/命中后端/脱敏命中/失败）。
+	observ.AICallsTotal.Inc(map[string]string{
+		"tenant":     req.TenantID,
+		"capability": string(req.Capability),
+		"backend":    dec.Provider,
+		"allowed":    b2s(dec.Allowed),
+		"redacted":   b2s(dec.RequireRedaction),
+	})
 
 	if r.auditSink != nil {
 		r.auditSink(ctx, AuditEvent{
@@ -111,12 +131,17 @@ func (r *Router) RouteAndChat(ctx context.Context, req ChatRequest) (*ChatRespon
 		}
 	}
 
+	t0 := time.Now()
 	resp, err := provider.Chat(ctx, effective)
+	observ.AIDurationMs.Observe(map[string]string{"backend": dec.Provider}, float64(time.Since(t0).Milliseconds()))
 	if err != nil {
+		observ.AIErrorsTotal.Inc(map[string]string{"tenant": req.TenantID, "backend": dec.Provider})
+		observ.Error(ctx, "ai provider chat failed", "backend", dec.Provider, "capability", string(req.Capability), "err", err.Error())
 		return nil, err
 	}
 	resp.Redacted = dec.RequireRedaction
 	resp.Backend = dec.Provider
+	observ.Info(ctx, "ai chat ok", "backend", dec.Provider, "capability", string(req.Capability), "tenant", req.TenantID)
 	return resp, nil
 }
 

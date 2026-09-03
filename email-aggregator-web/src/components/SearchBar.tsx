@@ -23,7 +23,7 @@ const SearchBar = forwardRef<HTMLInputElement, Props>(({ onSearch }, ref) => {
         <button
           type="button"
           className="search-clear"
-          onClick={() => setQ('')}
+          onClick={() => { setQ(''); onSearch('') }}
           aria-label="清空搜索"
         >
           ×

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { CanonicalMail, SearchHit } from '../types'
 
 interface Props {
@@ -18,9 +18,13 @@ function fmtDate(ts: number): string {
 // mail 优先（含正文/收件人/附件），命中项 hit 仅含预览。
 // 仅当存在权威 mail 时提供「标记已读/未读」「删除」操作。
 export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete }: Props) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+
   // Esc 关闭模态（仅在打开时注册监听，避免全局常驻）
   useEffect(() => {
     if (!mail && !hit) return
+    // 打开时聚焦关闭按钮（屏幕阅读器与键盘用户起点）
+    closeRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -39,12 +43,18 @@ export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete 
   const displayBody = body || previewFallback
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose} aria-label="关闭">
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mail-detail-subject"
+      >
+        <button ref={closeRef} className="modal-close" onClick={onClose} aria-label="关闭详情对话框">
           ×
         </button>
-        <h3 className="mail-detail-subject">{subject}</h3>
+        <h3 id="mail-detail-subject" className="mail-detail-subject">{subject}</h3>
         <div className="mail-detail-meta">
           <div>来自：{from}</div>
           {mail && <div>收件：{to}</div>}

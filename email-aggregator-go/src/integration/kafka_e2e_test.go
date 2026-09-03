@@ -93,6 +93,9 @@ func kafkaDialOverride() func(ctx context.Context, network, address string) (net
 func TestKafkaAdapter_RealE2E_RoundTrip(t *testing.T) {
 	topic := events.TopicMailIngested // 用规范主题验证 Type 映射
 	kafkaEnsureTopic(t, topic)
+	// 等待主题元数据/分区 leader 就绪（对齐 DLQ 测试），避免长生命周期 broker 上
+	// 主题被删除重建或刚创建时 leader 未稳定，消费者入组前发布导致丢消息（偶发超时）。
+	kafkaWaitTopicMetadata(t, topic, 8*time.Second)
 	group := kafkaUnique("e2e-roundtrip-grp")
 	adapter := NewKafkaAdapter([]string{kafkaBroker}).WithDial(kafkaDialOverride())
 	defer adapter.Close()
@@ -112,23 +115,29 @@ func TestKafkaAdapter_RealE2E_RoundTrip(t *testing.T) {
 	payload := []byte(`{"tenantId":"t1","accountId":"a1","mailId":"m1","subject":"e2e"}`)
 	kafkaPublish(t, adapter, ctx, topic, "t1:a1:m1", payload)
 
-	select {
-	case env := <-got:
-		if env.Key != "t1:a1:m1" {
-			t.Fatalf("key = %q, want t1:a1:m1", env.Key)
+	// 循环消费直到命中本测试消息（跳过历史积压/其他生产者消息），
+	// 使共享规范主题 mail-ingested 在长生命周期 broker 上也能稳定往返。
+	for {
+		select {
+		case env := <-got:
+			if env.Key != "t1:a1:m1" {
+				continue // 非本测试消息（历史积压或运行中服务生产），跳过
+			}
+			if string(env.Payload) != string(payload) {
+				t.Fatalf("payload mismatch: %s vs %s", env.Payload, payload)
+			}
+			if env.Type != "MailIngested" {
+				t.Fatalf("Type = %q, want MailIngested", env.Type)
+			}
+			if env.Topic != topic {
+				t.Fatalf("Topic = %q", env.Topic)
+			}
+			goto roundTripOK
+		case <-ctx.Done():
+			t.Fatal("timeout waiting for round-trip message")
 		}
-		if string(env.Payload) != string(payload) {
-			t.Fatalf("payload mismatch: %s vs %s", env.Payload, payload)
-		}
-		if env.Type != "MailIngested" {
-			t.Fatalf("Type = %q, want MailIngested", env.Type)
-		}
-		if env.Topic != topic {
-			t.Fatalf("Topic = %q", env.Topic)
-		}
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for round-trip message")
 	}
+roundTripOK:
 }
 
 // TestKafkaAdapter_RealE2E_DLQ 验证：handler 持续失败 → 有界重试耗尽 → 消息转投 <topic>-dlq，

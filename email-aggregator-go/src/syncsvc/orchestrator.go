@@ -8,6 +8,7 @@ import (
 
 	"email-aggregator-go/src/events"
 	"email-aggregator-go/src/model"
+	"email-aggregator-go/src/observ"
 	"email-aggregator-go/src/security"
 	"email-aggregator-go/src/store"
 	"email-aggregator-go/src/tenant"
@@ -100,13 +101,18 @@ func (s *busSink) OnDelete(_ context.Context, id string) error {
 //
 // 任意步骤失败 → 状态机迁移至 ERROR，返回错误（调用方可使用 Backoff 重试）。
 func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskEvent) error {
+	start := time.Now()
+	tid := tenant.Resolve(task.TenantID)
+	var provider string // 埋点标签：由账户注册表推断（未挂载时留空）
+
 	// ── 连接/账户服务门控：paused 跳过，error 拦截，未注册账户向后兼容放行 ──
 	if o.deps.Accounts != nil {
-		acct, err := o.deps.Accounts.GetAccount(tenant.Resolve(task.TenantID), task.AccountID)
+		acct, err := o.deps.Accounts.GetAccount(tid, task.AccountID)
 		if err != nil {
 			return fmt.Errorf("account registry lookup (account=%s): %w", task.AccountID, err)
 		}
 		if acct != nil {
+			provider = string(acct.Provider)
 			switch acct.Status {
 			case model.AccountPaused:
 				fmt.Printf("[orchestrator] account=%s status=paused -> skip sync\n", task.AccountID)
@@ -128,6 +134,9 @@ func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskE
 	if o.deps.Connector != nil {
 		if err := o.deps.Connector.Connect(ctx, o.deps.Credential); err != nil {
 			o.transitionError()
+			observ.ConnectorErrors.Inc(map[string]string{"tenant": tid, "account": task.AccountID, "provider": provider})
+			observ.SyncTotal.Inc(map[string]string{"tenant": tid, "account": task.AccountID, "provider": provider, "status": "error"})
+			observ.Error(ctx, "connector connect failed", "account", task.AccountID, "err", err.Error())
 			return fmt.Errorf("connector connect failed (account=%s): %w", task.AccountID, err)
 		}
 	}
@@ -150,10 +159,12 @@ func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskE
 		// 全量采集
 		if o.deps.Connector != nil {
 			since := int64(0) // 全量从最早开始；生产环境可从 task.Cursor 读取
-			if err := o.deps.Connector.InitialFullSync(ctx, since, sink); err != nil {
-				o.transitionError()
-				return fmt.Errorf("initial full sync failed (account=%s): %w", task.AccountID, err)
-			}
+		if err := o.deps.Connector.InitialFullSync(ctx, since, sink); err != nil {
+			o.transitionError()
+			observ.SyncTotal.Inc(map[string]string{"tenant": tid, "account": task.AccountID, "provider": provider, "status": "error"})
+			observ.Error(ctx, "initial full sync failed", "account", task.AccountID, "err", err.Error())
+			return fmt.Errorf("initial full sync failed (account=%s): %w", task.AccountID, err)
+		}
 		}
 		// 全量完成 → INITIAL_FULL → INCREMENTAL
 		next, err = Advance(o.state, EvFullDone)
@@ -175,15 +186,19 @@ func (o *Orchestrator) HandleSyncTask(ctx context.Context, task events.SyncTaskE
 			}
 		}
 		if o.deps.Connector != nil {
-			if err := o.deps.Connector.IncrementalSync(ctx, task.Cursor, sink); err != nil {
-				o.transitionError()
-				return fmt.Errorf("incremental sync failed (account=%s): %w", task.AccountID, err)
-			}
+		if err := o.deps.Connector.IncrementalSync(ctx, task.Cursor, sink); err != nil {
+			o.transitionError()
+			observ.SyncTotal.Inc(map[string]string{"tenant": tid, "account": task.AccountID, "provider": provider, "status": "error"})
+			observ.Error(ctx, "incremental sync failed", "account", task.AccountID, "err", err.Error())
+			return fmt.Errorf("incremental sync failed (account=%s): %w", task.AccountID, err)
+		}
 		}
 	}
 
-	fmt.Printf("[orchestrator] tenant=%s account=%s mode=%s -> state=%s\n",
-		tenant.Resolve(task.TenantID), task.AccountID, task.Mode, o.state)
+	elapsedMs := float64(time.Since(start).Milliseconds())
+	observ.SyncDurationMs.Observe(map[string]string{"tenant": tid, "account": task.AccountID, "mode": task.Mode}, elapsedMs)
+	observ.SyncTotal.Inc(map[string]string{"tenant": tid, "account": task.AccountID, "provider": provider, "status": "ok"})
+	observ.Info(ctx, "sync done", "account", task.AccountID, "mode", task.Mode, "state", string(o.state), "elapsedMs", elapsedMs)
 
 	// 同步成功后持久化同步游标（连接/账户/游标服务，未挂载则跳过；游标为空表示无邮件，不覆盖旧游标）
 	if o.deps.Cursor != nil && sink.maxLastUID > 0 {

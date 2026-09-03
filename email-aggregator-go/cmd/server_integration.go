@@ -28,6 +28,7 @@ import (
 	"email-aggregator-go/src/integration"
 	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/notify"
+	"email-aggregator-go/src/observ"
 	"email-aggregator-go/src/tenant"
 )
 
@@ -140,7 +141,16 @@ func main() {
 		WithAccounts(adapters.Accounts).
 		WithCredentialVault(vault).
 		WithAccountSyncer(syncer).
+		WithObserv(observ.Default()).
 		Handler())
+
+	// 可观测性：Prometheus 抓取端点（对齐蓝图 §10 Prometheus + Grafana）。
+	// 与 /api/metrics（JSON 快照，供调试）并存；此处为 Prometheus 文本 exposition 格式。
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/plain; version=0.0.4; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(observ.Default().PrometheusExposition()))
+	})
 
 	// WebSocket 实时推送：通过可选接口断言解耦于具体 Notifier 实现类型。
 	// 任意实现了 Upgrade(w, r, accountID) 的 Notifier 均可挂载；断言失败仅跳过 /ws 路由（不再静默 nil→500）。

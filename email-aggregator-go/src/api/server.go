@@ -3,15 +3,18 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strconv"
 	"time"
 
 	"email-aggregator-go/src/aigateway"
 	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/notify"
+	"email-aggregator-go/src/observ"
 	"email-aggregator-go/src/search"
 	"email-aggregator-go/src/security"
 	"email-aggregator-go/src/store"
@@ -46,6 +49,7 @@ type ApiServer struct {
 	accounts store.AccountStore  // 可选：连接/账户服务（未挂载时 /api/accounts 回退元数据推导）
 	vault    *security.CredentialVault // 可选：凭据保险库（开启 /api/accounts/{id}/credentials）
 	syncer   AccountSyncer       // 可选：账户同步执行器（开启 /api/accounts/{id}/sync）
+	observ   *observ.Registry    // 可选：可观测性注册表（开启 /api/metrics 与 health detail）
 	port     int
 }
 
@@ -84,6 +88,12 @@ func (s *ApiServer) WithWSHub(h *notify.Hub) *ApiServer {
 	return s
 }
 
+// WithObserv 可选挂载可观测性注册表（开启 /api/metrics，扩展 /api/health 返回指标快照）。
+func (s *ApiServer) WithObserv(reg *observ.Registry) *ApiServer {
+	s.observ = reg
+	return s
+}
+
 // Handler 返回 http.Handler（可挂载到任意 mux / 网关之后；WS 升级由 notify.Notifier 在真实版处理）
 func (s *ApiServer) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -111,9 +121,14 @@ func (s *ApiServer) Handler() http.Handler {
 	}
 	// 演示用：触发一封新邮件并实时推送（生产由真实同步流水线驱动）
 	mux.HandleFunc("/api/demo/push", s.handleDemoPush)
+	// 可观测性端点（挂载 observ 时可用）
+	if s.observ != nil {
+		mux.HandleFunc("/api/metrics", s.handleMetrics)
+	}
 	// 自包含发布形态：在 webui 构建下托管内嵌 SPA；开发态为空操作。
 	s.mountStatic(mux)
-	return mux
+	// trace 中间件：注入/透传 X-Trace-ID，贯穿到业务埋点结构化日志
+	return traceMiddleware(mux)
 }
 
 // handleAIChat ADR-010 的 REST 入口：解析 ChatRequest → Router 路由+脱敏+审计 → 写响应/错误。
@@ -141,7 +156,12 @@ func (s *ApiServer) handleAIChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *ApiServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true})
+	body := map[string]any{"ok": true, "service": "email-aggregator-go"}
+	if s.observ != nil {
+		body["goroutines"] = runtime.NumGoroutine()
+		body["metrics"] = s.observ.Snapshot()
+	}
+	writeJSON(w, 200, body)
 }
 
 // handleMailByID 按 HTTP 方法分派：GET 取单封权威资源，DELETE 删除邮件并广播事件。
@@ -608,4 +628,33 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // Addr 返回监听地址（便于测试）
 func (s *ApiServer) Addr() string {
 	return fmt.Sprintf(":%d", s.port)
+}
+
+// handleMetrics 返回进程内指标快照（JSON）。集成构建可经 observ.PrometheusExposition
+// 暴露 Prometheus 文本格式（由 cmd/server_integration.go 在 integration 标签下挂载 /metrics）。
+func (s *ApiServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	if s.observ == nil {
+		writeJSON(w, 501, map[string]any{"error": "observ not mounted"})
+		return
+	}
+	writeJSON(w, 200, s.observ.Snapshot())
+}
+
+// traceMiddleware 注入/透传 X-Trace-ID 到请求 context，贯穿 HTTP → 编排 → 摄取 → AI 埋点结构化日志。
+func traceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tid := r.Header.Get("X-Trace-ID")
+		if tid == "" {
+			tid = newTraceID()
+		}
+		ctx := observ.WithTraceID(r.Context(), tid)
+		w.Header().Set("X-Trace-ID", tid)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func newTraceID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%d-%x", time.Now().UnixNano(), b)
 }

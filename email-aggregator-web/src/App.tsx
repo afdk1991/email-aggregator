@@ -172,6 +172,7 @@ export default function App() {
   // 详情内删除邮件（本地即时移除 + 服务端权威 + 刷新徽标；WS 事件兜底）。
   const removeMail = useCallback(
     async (mail: CanonicalMail) => {
+      if (!window.confirm(`确定删除邮件「${mail.subject || '(无主题)'}」？此操作不可撤销。`)) return
       setMails((ms) => ms.filter((m) => m.id !== mail.id))
       setSelectedMail(null)
       setSelectedHit(null)
@@ -321,6 +322,7 @@ export default function App() {
   // 删除账户：从注册表移除；若删除的是当前账户，切回默认账户。
   const removeAccount = useCallback(
     async (acc: AccountInfo) => {
+      if (!window.confirm(`确定删除账户「${acc.id}」？其邮件数据将被清除且不可恢复。`)) return
       setAccountBusy(true)
       setError(null)
       try {
@@ -392,6 +394,8 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* 跳过导航直达内容（WCAG 2.4.1） */}
+      <a href="#main-content" className="skip-link">跳至主内容</a>
       <header className="app-header">
         <h1>邮箱聚合平台</h1>
         <div className="header-status">
@@ -404,13 +408,12 @@ export default function App() {
       </header>
 
       <section className="toolbar">
-        <div className="account-switch" role="tablist" aria-label="账户切换">
+        <div className="account-switch" role="group" aria-label="账户切换">
           <span className="account-switch-label">账户</span>
           {accounts.map((acc) => (
             <button
               key={acc.id}
-              role="tab"
-              aria-selected={acc.id === accountId}
+              aria-pressed={acc.id === accountId}
               className={`account-chip ${acc.id === accountId ? 'active' : ''} ${acc.status && acc.status !== 'active' ? `status-${acc.status}` : ''}`}
               onClick={() => setAccountId(acc.id)}
               title={acc.email ? `${acc.email} · ${acc.provider ?? ''}` : undefined}
@@ -548,8 +551,8 @@ export default function App() {
 
       {error && <div className="error">错误：{error}</div>}
 
-      {/* 实时通知 toast 区 */}
-      <div className="toast-zone">
+      {/* 实时通知 toast 区（aria-live 供屏幕阅读器播报） */}
+      <div className="toast-zone" role="status" aria-live="polite" aria-atomic="false">
         {toasts.map((t, i) => (
           <div key={`${t.ts}-${i}`} className={`toast toast-${t.kind}`}>
             <strong>
@@ -560,7 +563,7 @@ export default function App() {
         ))}
       </div>
 
-      <main className="content">
+      <main className="content" id="main-content">
         <section className="mail-pane">
           <h2>{hits ? '检索结果' : `收件箱 · ${accountId}`}</h2>
           {hits ? (

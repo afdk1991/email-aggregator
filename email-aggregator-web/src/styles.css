@@ -1,13 +1,47 @@
 :root {
   --bg: #f5f7fa;
   --panel: #ffffff;
+  --panel-2: #f4f6fb;
   --border: #e3e8ef;
   --text: #1f2933;
   --muted: #6b7280;
   --primary: #2563eb;
   --ok: #16a34a;
+  --ok-text: #15803d;
+  --ok-bg: #dcfce7;
   --err: #dc2626;
+  --err-text: #b91c1c;
+  --err-bg: #fee2e2;
+  --accent: #e5484d;
+  --accent-text: #d13a43;
   --pending: #d97706;
+  --pending-text: #b45309;
+  --pending-bg: #fef3c7;
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.18);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+}
+
+/* 跳至主内容链接（WCAG 2.4.1 Bypass Blocks） */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  z-index: 100;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: #fff;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+.skip-link:focus {
+  top: 16px;
 }
 
 * {
@@ -40,24 +74,24 @@ body {
 
 .badge {
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 13px;
   font-weight: 600;
 }
 
 .badge.ok {
-  background: #dcfce7;
-  color: var(--ok);
+  background: var(--ok-bg);
+  color: var(--ok-text);
 }
 
 .badge.err {
-  background: #fee2e2;
-  color: var(--err);
+  background: var(--err-bg);
+  color: var(--err-text);
 }
 
 .badge.pending {
-  background: #fef3c7;
-  color: var(--pending);
+  background: var(--pending-bg);
+  color: var(--pending-text);
 }
 
 .toolbar {
@@ -93,7 +127,7 @@ body {
   color: var(--text);
   border: 1px solid var(--border);
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -119,8 +153,8 @@ body {
   height: 18px;
   margin-left: 6px;
   padding: 0 5px;
-  border-radius: 999px;
-  background: var(--accent, #e5484d);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -133,7 +167,7 @@ body {
   align-items: center;
   margin-left: 6px;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
 }
@@ -142,7 +176,7 @@ body {
   color: #fff;
 }
 .account-chip.status-error .chip-status {
-  background: var(--accent, #e5484d);
+  background: var(--accent);
   color: #fff;
 }
 
@@ -157,7 +191,7 @@ body {
 .account-actions button {
   font-size: 12px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--panel);
   border: 1px solid var(--border);
   cursor: pointer;
@@ -166,8 +200,8 @@ body {
   border-color: var(--primary);
 }
 .account-actions button.danger-btn:hover:not(:disabled) {
-  border-color: var(--accent, #e5484d);
-  color: var(--accent, #e5484d);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .account-actions button:disabled {
   opacity: 0.5;
@@ -190,7 +224,7 @@ body {
 }
 .cred-form input {
   padding: 5px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg, #fff);
   font-size: 12px;
@@ -202,7 +236,7 @@ body {
 .cred-form button {
   font-size: 12px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--primary);
   color: #fff;
   border: none;
@@ -211,14 +245,14 @@ body {
 .sync-error {
   margin-left: 10px;
   font-size: 12px;
-  color: var(--accent, #e5484d);
+  color: var(--accent);
 }
 
 /* 添加账户入口按钮 */
 .add-account-btn {
   font-size: 12px;
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   border: 1px dashed var(--primary);
   color: var(--primary);
@@ -234,13 +268,13 @@ body {
   margin: 8px 0 16px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--panel);
 }
 .account-form input,
 .account-form select {
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg, #fff);
   font-size: 13px;
@@ -251,7 +285,7 @@ body {
 }
 .account-form button {
   padding: 6px 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--primary);
   color: #fff;
   border: none;
@@ -268,7 +302,7 @@ body {
   font-weight: 700;
 }
 .mail-item.unread {
-  background: var(--panel-2, #f4f6fb);
+  background: var(--panel-2);
 }
 .unread-dot {
   display: inline-block;
@@ -276,7 +310,7 @@ body {
   height: 8px;
   margin-right: 6px;
   border-radius: 50%;
-  background: var(--accent, #e5484d);
+  background: var(--accent);
   vertical-align: middle;
 }
 
@@ -285,15 +319,15 @@ body {
   font-size: 12px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 .read-state.unread {
-  color: var(--accent, #e5484d);
-  background: rgba(229, 72, 77, 0.12);
+  color: var(--accent-text);
+  background: rgba(229, 72, 77, 0.10);
 }
 .read-state.read {
   color: var(--muted);
-  background: rgba(120, 120, 120, 0.12);
+  background: rgba(107, 114, 128, 0.10);
 }
 .detail-actions {
   display: flex;
@@ -302,7 +336,7 @@ body {
 }
 .detail-btn {
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text);
@@ -314,14 +348,14 @@ body {
 }
 .detail-btn.danger {
   color: #fff;
-  background: var(--accent, #e5484d);
-  border-color: var(--accent, #e5484d);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 input,
 textarea {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   font-size: 14px;
   font-family: inherit;
@@ -338,7 +372,7 @@ button {
   background: var(--primary);
   color: #fff;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 14px;
 }
@@ -346,6 +380,36 @@ button {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* 键盘焦点可达性 */
+button:focus-visible,
+.account-chip:focus-visible,
+[role='button']:focus-visible,
+.detail-btn:focus-visible,
+.add-account-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.search-clear:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: 2px;
+}
+
+/* 触摸目标最小尺寸（WCAG 2.5.8: 44×44 CSS px） */
+.account-chip,
+.chip-badge,
+.search-clear,
+.modal-close,
+.detail-btn,
+.badge,
+.ws-badge {
+  min-height: 44px;
+}
+.chip-badge {
+  min-width: 44px;
+  justify-content: center;
 }
 
 .search-bar {
@@ -359,7 +423,7 @@ button:disabled {
   font-size: 18px;
   line-height: 1;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .search-clear:hover {
@@ -374,11 +438,100 @@ button:disabled {
   align-items: start;
 }
 
+.content > * {
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
+  .app {
+    padding: 12px;
+  }
+  .app-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-bar {
+    width: 100%;
+  }
+  .search-bar input {
+    flex: 1;
+    min-width: 0;
+  }
+  .content {
+    grid-template-columns: 1fr;
+  }
+  .ai-pane {
+    order: 1;
+  }
+  .mail-pane {
+    order: 0;
+  }
+}
+
+/* 平板竖屏（768px）：优化间距 */
+@media (max-width: 768px) and (min-width: 481px) {
+  .app {
+    padding: 16px;
+  }
+  .mail-detail-subject {
+    font-size: 16px;
+  }
+  .modal {
+    max-width: 90%;
+    padding: 16px;
+  }
+}
+
+/* 小屏手机（≤480px）：紧凑布局 */
+@media (max-width: 480px) {
+  .app {
+    padding: 8px;
+  }
+  .app-header h1 {
+    font-size: 18px;
+  }
+  .header-status {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .account-switch {
+    width: 100%;
+  }
+  .account-actions {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: 8px;
+    width: 100%;
+  }
+  .cred-form {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    margin-left: 0;
+    padding-top: 8px;
+    width: 100%;
+  }
+  .mail-detail-subject {
+    font-size: 16px;
+    margin-right: 32px;
+  }
+  .detail-actions {
+    flex-direction: column;
+  }
+  .detail-btn {
+    text-align: center;
+  }
+}
+
 .mail-pane,
 .ai-pane {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px;
 }
 
@@ -420,10 +573,10 @@ button:disabled {
 }
 
 .error {
-  background: #fee2e2;
-  color: var(--err);
+  background: var(--err-bg);
+  color: var(--err-text);
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin: 12px 0;
   font-size: 14px;
 }
@@ -440,7 +593,7 @@ button:disabled {
 
 .ai-msg {
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 14px;
 }
 
@@ -482,12 +635,12 @@ h2 {
   font-size: 13px;
   font-weight: 600;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .ws-badge.on {
-  background: #dcfce7;
-  color: var(--ok);
+  background: var(--ok-bg);
+  color: var(--ok-text);
 }
 
 .ws-badge.off {
@@ -496,8 +649,8 @@ h2 {
 }
 
 .ws-badge.reconnecting {
-  background: #fef3c7;
-  color: var(--pending);
+  background: var(--pending-bg);
+  color: var(--pending-text);
 }
 
 .unread-badge {
@@ -507,7 +660,7 @@ h2 {
   font-weight: 700;
   min-width: 20px;
   height: 20px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -522,7 +675,12 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 12px 0;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 40;
+  max-width: 400px;
+  width: calc(100% - 40px);
 }
 
 .toast {
@@ -532,10 +690,10 @@ h2 {
   background: var(--panel);
   border: 1px solid var(--border);
   border-left: 4px solid var(--primary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   font-size: 14px;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--shadow-sm);
   animation: toast-in 0.2s ease-out;
 }
 
@@ -592,14 +750,14 @@ h2 {
 .modal {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 20px 22px;
   max-width: 560px;
   width: 100%;
   max-height: 80vh;
   overflow-y: auto;
   position: relative;
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--shadow-lg);
 }
 
 .modal-close {
@@ -611,7 +769,7 @@ h2 {
   font-size: 22px;
   line-height: 1;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .modal-close:hover {
@@ -648,7 +806,7 @@ h2 {
 .notif-feed {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px;
   margin-bottom: 16px;
 }
@@ -675,7 +833,7 @@ h2 {
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #f8fafc;
   border-left: 3px solid var(--primary);
   font-size: 13px;
@@ -728,7 +886,7 @@ h2 {
   padding: 10px 12px;
   background: #f8fafc;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .attach-title {
@@ -754,7 +912,7 @@ h2 {
   padding: 6px 8px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .attach-name {
@@ -779,7 +937,7 @@ h2 {
   background: var(--panel);
   border: 1px solid var(--border);
   border-left: 4px solid var(--err);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   text-align: center;
 }
 
@@ -793,4 +951,53 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   word-break: break-word;
+}
+
+/* ---- 减少动效偏好（WCAG 2.3.3） ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- 打印样式 ---- */
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .app {
+    max-width: none;
+    padding: 0;
+  }
+  .toolbar,
+  .ai-pane,
+  .toast-zone,
+  .account-actions,
+  .cred-form,
+  .simulate-btn,
+  .search-bar,
+  .clear-search-btn,
+  .add-account-btn,
+  .sync-error,
+  .modal-overlay {
+    display: none !important;
+  }
+  .content {
+    display: block;
+  }
+  .mail-pane {
+    border: none;
+    padding: 0;
+    box-shadow: none;
+  }
+  .mail-item {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
