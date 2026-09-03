@@ -1,9 +1,13 @@
 ﻿# =============================================================
 # start-local.ps1 —— 邮箱聚合平台 一键本地启动
 # -------------------------------------------------------------
-# 作用：本机 Docker Desktop 首次启动不稳定，因此本脚本改用
-#   Ubuntu WSL 内原生 dockerd 作为 Docker 引擎，并在此之上
-#   拉起 PG / MinIO / OpenSearch / Kafka 四件套 + 一键初始化，
+# 作用：本机 Docker Desktop 首次启动不稳定，历史脚本改用
+#   Ubuntu WSL 内原生 dockerd 作为 Docker 引擎。2026-09-03 起
+#   Ubuntu WSL 虚拟磁盘(C:\WSL\Ubuntu\ext4.vhdx)被删除丢失，
+#   中间件改由宿主机 Docker Desktop 承载（兼容优先），WSL 路径
+#   保留为回退分支。脚本自动探测可用引擎：
+#     1) 宿主机 docker CLI 可用（Docker Desktop）→ 直接使用
+#     2) 否则回退 Ubuntu WSL 原生 dockerd（历史路径）
 #   最后以「自包含」形态运行集成服务（同端口提供 SPA + REST + WS）。
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File .\deploy\start-local.ps1
@@ -25,6 +29,18 @@ $ServerExe = Join-Path $BinDir 'integ-webui.exe'
 $WslDist  = 'Ubuntu'
 $WslDeploy = '/mnt/d/网站全栈项目/项目003/email-aggregator-go/deploy'
 
+# ── 从 .env 读取中间件凭证（与 compose/bootstrap 对齐）──
+function Get-EnvVar($name, $def) {
+    $line = Select-String -Path (Join-Path $Deploy '.env') -Pattern "^$name=" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($line) { $line.Line -replace "^$name=",'' } else { $def }
+}
+$PG_USER    = Get-EnvVar 'PG_USER' 'agg'
+$PG_PASS    = Get-EnvVar 'PG_PASSWORD' 'agg-secret'
+$PG_DB      = Get-EnvVar 'PG_DATABASE' 'mailagg'
+$MINIO_USER = Get-EnvVar 'MINIO_ROOT_USER' 'agg'
+$MINIO_PASS = Get-EnvVar 'MINIO_ROOT_PASSWORD' 'agg-secret'
+$OS_ADMIN   = Get-EnvVar 'OPENSEARCH_INITIAL_ADMIN_PASSWORD' 'Kp3mQ9@vL2*rT7xA8'
+
 function Step($msg) { Write-Host "[$([DateTime]::Now.ToString('HH:mm:ss'))] $msg" -ForegroundColor Cyan }
 function Ok($msg)   { Write-Host "  [ok] $msg" -ForegroundColor Green }
 function Wrn($msg)  { Write-Host "  [warn] $msg" -ForegroundColor Yellow }
@@ -33,28 +49,76 @@ function Wrn($msg)  { Write-Host "  [warn] $msg" -ForegroundColor Yellow }
 $inUse = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($inUse) { Wrn "端口 $Port 已被占用，可能是服务已在运行（无需重复启动）。" ; exit 0 }
 
-# ── 1) 确保 Ubuntu WSL 的 dockerd 运行 ──
-Step '1/5 确保 WSL Docker 引擎运行…'
-$dockerdUp = wsl -d $WslDist -u root -- sh -c "pgrep -x dockerd >/dev/null && echo UP || echo DOWN" 2>$null | Select-Object -Last 1
-if ($dockerdUp -ne 'UP') {
-    wsl -d $WslDist -u root -- sh -c "mkdir -p /var/log/docker && nohup dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 >/var/log/docker/dockerd.log 2>&1 &"
-    Start-Sleep -Seconds 8
+# ── Docker 引擎探测：优先宿主机 Docker Desktop，否则 WSL 原生 dockerd ──
+$UseHostDocker = $false
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    docker info *> $null
+    if ($LASTEXITCODE -eq 0) { $UseHostDocker = $true }
 }
-wsl -d $WslDist -u root -- docker info 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'WSL Docker 引擎未能启动，请检查 wsl -d Ubuntu -- docker info' }
-Ok 'WSL Docker 引擎就绪'
+
+# ── 1) 确保 Docker 引擎运行 ──
+Step '1/5 确保 Docker 引擎运行…'
+if ($UseHostDocker) {
+    Ok '使用宿主机 Docker Desktop 引擎（docker CLI 可用）'
+} else {
+    $dockerdUp = wsl -d $WslDist -u root -- sh -c "pgrep -x dockerd >/dev/null && echo UP || echo DOWN" 2>$null | Select-Object -Last 1
+    if ($dockerdUp -ne 'UP') {
+        wsl -d $WslDist -u root -- sh -c "mkdir -p /var/log/docker && nohup dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 >/var/log/docker/dockerd.log 2>&1 &"
+        Start-Sleep -Seconds 8
+    }
+    wsl -d $WslDist -u root -- docker info 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'WSL Docker 引擎未能启动，请先启动 Docker Desktop 或恢复 Ubuntu WSL' }
+    Ok 'WSL Docker 引擎就绪'
+}
 
 # ── 2) 拉起中间件栈（compose up -d）──
 Step '2/5 拉起中间件栈（PG / MinIO / OpenSearch / Kafka）…'
-wsl -d $WslDist -u root -- sh -c "cd '$WslDeploy' && docker compose up -d 2>&1"
-if ($LASTEXITCODE -ne 0) { throw 'docker compose up -d 失败，请检查 WSL 内 docker 状态' }
+if ($UseHostDocker) {
+    Push-Location $Deploy
+    try { docker compose up -d 2>&1 } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw 'docker compose up -d 失败，请检查 Docker Desktop 状态' }
+} else {
+    wsl -d $WslDist -u root -- sh -c "cd '$WslDeploy' && docker compose up -d 2>&1"
+    if ($LASTEXITCODE -ne 0) { throw 'docker compose up -d 失败，请检查 WSL 内 docker 状态' }
+}
 Ok '容器已启动'
 
 # ── 3) 一键初始化（迁移 / 桶 / 索引模板 / 主题，幂等可重跑）──
 Step '3/5 初始化中间件（迁移/MinIO/OpenSearch/Kafka 主题）…'
-wsl -d $WslDist -u root -- sh -c "cd '$WslDeploy' && bash bootstrap.sh 2>&1"
-if ($LASTEXITCODE -ne 0) { throw 'bootstrap.sh 初始化失败，请查看上方输出' }
-Ok '初始化完成'
+if ($UseHostDocker) {
+    # 宿主机路径：直接经 docker compose exec 执行，避免 WSL bash 的 MSYS 路径转换坑
+    # （/migrations 被 Git Bash 误转成 C:/Program Files/Git/... 的问题）
+    Push-Location $Deploy
+    try {
+        # 等 PG 就绪
+        $pgReady = $false
+        for ($i = 0; $i -lt 60; $i++) {
+            docker exec deploy-postgres-1 pg_isready -U $PG_USER *> $null
+            if ($LASTEXITCODE -eq 0) { $pgReady = $true; break }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $pgReady) { throw 'PostgreSQL 60s 内未就绪' }
+        # 重放迁移（幂等）
+        foreach ($m in @('001_init.sql','002_citus_sharding.sql','003_read_flag.sql','004_account_registry.sql','005_account_server_host.sql')) {
+            docker compose exec -T postgres psql -U $PG_USER -d $PG_DB -v ON_ERROR_STOP=1 -f "/migrations/$m"
+            if ($LASTEXITCODE -ne 0) { throw "迁移 $m 失败" }
+        }
+        # MinIO 建桶
+        docker compose run --rm --entrypoint sh mc -c "mc alias set local http://minio:9000 $MINIO_USER $MINIO_PASS && mc mb --ignore-existing local/agg-mail" 2>&1 | Out-Null
+        # OpenSearch 索引模板
+        $osJson = '{"index_patterns":["mail-*"],"template":{"settings":{"number_of_shards":1,"number_of_replicas":0},"mappings":{"properties":{"accountId":{"type":"keyword"},"subject":{"type":"text"},"from":{"type":"keyword"},"bodyText":{"type":"text"},"internalDate":{"type":"date"}}}}}'
+        docker compose exec -i opensearch curl -fsS -u "admin:$OS_ADMIN" -k -X PUT "https://localhost:9200/_index_template/mail" -H 'Content-Type: application/json' -d $osJson *> $null
+        # Kafka 主题
+        foreach ($t in @('sync-tasks','mail-ingested','mail-index','notifications','audit')) {
+            docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $t --partitions 1 --replication-factor 1 2>&1 | Out-Null
+        }
+    } finally { Pop-Location }
+    Ok '初始化完成（宿主机 Docker）'
+} else {
+    wsl -d $WslDist -u root -- sh -c "cd '$WslDeploy' && bash bootstrap.sh 2>&1"
+    if ($LASTEXITCODE -ne 0) { throw 'bootstrap.sh 初始化失败，请查看上方输出' }
+    Ok '初始化完成'
+}
 
 # ── 4) 编译自包含服务（可选 -Rebuild 强制重编）──
 Step '4/5 准备自包含集成服务（integration + webui）…'
@@ -73,15 +137,15 @@ Ok "二进制就绪：$ServerExe"
 
 # ── 5) 启动服务（宿主进程，连 127.0.0.1 已发布端口）──
 Step "5/5 启动服务于 http://localhost:$Port …"
-$env:PG_DSN            = 'postgres://agg:agg-secret@127.0.0.1:15432/mailagg'
+$env:PG_DSN            = "postgres://${PG_USER}:${PG_PASS}@127.0.0.1:15432/${PG_DB}"
 $env:MINIO_ENDPOINT    = '127.0.0.1:9000'
 $env:MINIO_BUCKET      = 'agg-mail'
-$env:MINIO_ACCESS_KEY  = 'agg'
-$env:MINIO_SECRET_KEY  = 'agg-secret'
+$env:MINIO_ACCESS_KEY  = $MINIO_USER
+$env:MINIO_SECRET_KEY  = $MINIO_PASS
 $env:MINIO_SECURE      = 'false'
 $env:OPENSEARCH_ADDR   = 'https://127.0.0.1:9200'
 $env:OPENSEARCH_USER   = 'admin'
-$env:OPENSEARCH_PASS   = 'Kp3mQ9@vL2*rT7xA8'
+$env:OPENSEARCH_PASS   = $OS_ADMIN
 $env:KAFKA_BROKERS     = '127.0.0.1:9092'
 # Kafka advertised 通告容器内网名 deploy-kafka-1，宿主机无法解析 —— 强制拨号回环，否则 mail-ingested 事件生产失败、
 # 摄取 worker 收不到事件导致邮件永不落库（真实联调踩坑：正文一直为空即此因）。
@@ -108,4 +172,3 @@ if (-not $healthy) {
     throw '服务启动失败，请查看上方错误日志'
 }
 Ok "服务已就绪： http://localhost:$Port  （API/WS 同端口；演示新邮件 POST /api/demo/push）"
-
