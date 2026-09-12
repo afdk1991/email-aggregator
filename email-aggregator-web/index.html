@@ -7,6 +7,16 @@
     <meta name="description" content="邮箱聚合平台 — 多账户邮件统一管理与 AI 智能助手" />
     <title>邮箱聚合平台</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📬</text></link>" />
+    <script>
+      // 主题初始化（在 CSS 之前执行，避免 FOUC 闪烁）
+      // 优先级：localStorage > prefers-color-scheme > light
+      (function () {
+        var saved = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = saved || (prefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

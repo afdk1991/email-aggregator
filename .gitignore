@@ -38,6 +38,7 @@ _inbox/
 .ci-logs/
 ts-integ.log
 ts-integ.err.log
+.tmp_*.txt
 
 # ---------- Phase 4 新增：Keycloak 联调 / Docker 卷 ----------
 .tmp_*/
