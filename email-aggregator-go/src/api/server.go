@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"email-aggregator-go/src/aigateway"
+	"email-aggregator-go/src/auth"
 	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/notify"
 	"email-aggregator-go/src/observ"
@@ -50,6 +51,7 @@ type ApiServer struct {
 	vault    *security.CredentialVault // 可选：凭据保险库（开启 /api/accounts/{id}/credentials）
 	syncer   AccountSyncer       // 可选：账户同步执行器（开启 /api/accounts/{id}/sync）
 	observ   *observ.Registry    // 可选：可观测性注册表（开启 /api/metrics 与 health detail）
+	auth     *auth.AuthMiddleware // 可选：Phase 3 鉴权中间件（ADR-009 网关层阻断 + RBAC + SSO 审计）
 	port     int
 }
 
@@ -94,18 +96,29 @@ func (s *ApiServer) WithObserv(reg *observ.Registry) *ApiServer {
 	return s
 }
 
+// WithAuth 可选挂载 Phase 3 鉴权中间件（ADR-009 网关层阻断 + RBAC + SSO 审计）。
+// 非破坏性：未调用时所有路由按 PoC 开放模式运行（向后兼容 Phase 1/2 既有行为）。
+// 挂载后 Wrap 全量 Bearer 验签，敏感路由额外叠加 Require(action) 的 RBAC 校验。
+func (s *ApiServer) WithAuth(m *auth.AuthMiddleware) *ApiServer {
+	s.auth = m
+	return s
+}
+
 // Handler 返回 http.Handler（可挂载到任意 mux / 网关之后；WS 升级由 notify.Notifier 在真实版处理）
 func (s *ApiServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", s.handleHealth)
-	mux.HandleFunc("/api/mails", s.handleMails)
-	mux.HandleFunc("/api/mails/{id}", s.handleMailByID)
-	mux.HandleFunc("/api/mails/{id}/read", s.handleSetRead)
-	mux.HandleFunc("/api/accounts", s.handleAccounts)
-	mux.HandleFunc("/api/accounts/{id}", s.handleAccountByID)
-	mux.HandleFunc("/api/accounts/{id}/credentials", s.handleAccountCredentials)
-	mux.HandleFunc("/api/accounts/{id}/sync", s.handleAccountSync)
-	mux.HandleFunc("/api/search", s.handleSearch)
+	// 邮件读路径：mail.read（viewer 即可读；列表/详情/检索同属此动作）
+	mux.Handle("/api/mails", s.require(auth.ActionMailRead)(http.HandlerFunc(s.handleMails)))
+	mux.Handle("/api/mails/{id}", s.require(auth.ActionMailRead)(http.HandlerFunc(s.handleMailByID)))
+	mux.Handle("/api/search", s.require(auth.ActionMailRead)(http.HandlerFunc(s.handleSearch)))
+	// 邮件写路径：mail.write（已读切换/删除）
+	mux.Handle("/api/mails/{id}/read", s.require(auth.ActionMailWrite)(http.HandlerFunc(s.handleSetRead)))
+	// 账户管理：account.manage（凭据录入 + 同步触发 + 账户 CRUD）
+	mux.Handle("/api/accounts", s.require(auth.ActionAccountCreate)(http.HandlerFunc(s.handleAccounts)))
+	mux.Handle("/api/accounts/{id}", s.require(auth.ActionAccountManage)(http.HandlerFunc(s.handleAccountByID)))
+	mux.Handle("/api/accounts/{id}/credentials", s.require(auth.ActionAccountManage)(http.HandlerFunc(s.handleAccountCredentials)))
+	mux.Handle("/api/accounts/{id}/sync", s.require(auth.ActionAccountManage)(http.HandlerFunc(s.handleAccountSync)))
 	if s.gw != nil {
 		mux.HandleFunc("/api/ai/chat", s.handleAIChat)
 	}
@@ -128,7 +141,21 @@ func (s *ApiServer) Handler() http.Handler {
 	// 自包含发布形态：在 webui 构建下托管内嵌 SPA；开发态为空操作。
 	s.mountStatic(mux)
 	// trace 中间件：注入/透传 X-Trace-ID，贯穿到业务埋点结构化日志
-	return traceMiddleware(mux)
+	// 鉴权中间件 Wrap 在 trace 之外：先验签注入 Claims，trace 透传 X-Trace-ID
+	h := http.Handler(mux)
+	if s.auth != nil {
+		h = s.auth.Wrap(h)
+	}
+	return traceMiddleware(h)
+}
+
+// require 包装 Require(action) 中间件；未挂载 auth 时直接返回原 handler（PoC 回退）。
+// 需配合 s.auth.Wrap 生效：Wrap 先注入 Claims，Require 再判权限。
+func (s *ApiServer) require(action auth.Action) func(http.Handler) http.Handler {
+	if s.auth == nil {
+		return func(h http.Handler) http.Handler { return h }
+	}
+	return s.auth.Require(action)
 }
 
 // handleAIChat ADR-010 的 REST 入口：解析 ChatRequest → Router 路由+脱敏+审计 → 写响应/错误。

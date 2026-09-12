@@ -270,7 +270,7 @@ test("集成：buildApp + runScenario 端到端闭环（ADR-009 默认租户）"
 //    不调用 Wire()（会触发外部依赖动态 import），仅验证：
 //    - integration.ts 在零外部依赖下可加载
 //    - 类型签名对齐 Go Wire()
-//    - Phase 1+ 物理隔离要素（OpenSearch mail-<tid> / 对象存储 tenant-<tid>/ 前缀 / KMS KEK）
+//    - Phase 2 / ADR-009 物理隔离要素（OpenSearch mail-<tid> / 对象存储 tenant-<tid>/ 前缀 / KMS KEK）
 // ---------------------------------------------------------------------------
 test("Integration：模块加载 + Wire/Config/RealAdapters 形态对齐 Go（#ts6）", async () => {
   const mod = await import("../src/integration/integration.ts");
@@ -301,7 +301,7 @@ test("Integration：模块加载 + Wire/Config/RealAdapters 形态对齐 Go（#t
   );
 });
 
-test("Integration：fromAppConfig + Phase 1+ 物理隔离要素（OpenSearch mail-<tid> 索引 / 对象存储 tenant-<tid>/ 前缀）", async () => {
+test("Integration：fromAppConfig + Phase 2 / ADR-009 物理隔离要素（OpenSearch mail-<tid> 索引 / 对象存储 tenant-<tid>/ 前缀）", async () => {
   const mod = await import("../src/integration/integration.ts");
   const { defaultConfig } = await import("../src/config.ts");
   const cfg = mod.fromAppConfig(defaultConfig, {
@@ -315,13 +315,13 @@ test("Integration：fromAppConfig + Phase 1+ 物理隔离要素（OpenSearch mai
   assert.deepEqual(cfg.kafkaBrokers, defaultConfig.kafkaBrokers, "kafkaBrokers 透传");
   assert.equal(cfg.objectSecure, false, "default http → secure=false");
 
-  // Phase 1+ 物理隔离：对象存储前缀 tenant-<tid>/mail/<sha256>
+  // Phase 2 / ADR-009 物理隔离：对象存储前缀 tenant-<tid>/mail/<sha256>
   // 由于 ObjectContentStore.put 需要真实 minio 连接，无法在零依赖单测中验证；
   // 改为校验外部接口契约：put 接受 tenantId 参数（ContentStore 接口扩展）
   // —— 此处仅做静态形态校验，不实际调用
   assert.equal(typeof mod.ObjectContentStore, "function", "ObjectContentStore 类导出");
 
-  // Phase 1+ 物理隔离：OpenSearch 索引 mail-<tid>
+  // Phase 2 / ADR-009 物理隔离：OpenSearch 索引 mail-<tid>
   // OpenSearchIndex.search 也需要真实连接，无法单测；改为校验类导出
   assert.equal(typeof mod.OpenSearchIndex, "function", "OpenSearchIndex 类导出");
   assert.equal(typeof mod.PgMetadataStore, "function", "PgMetadataStore 类导出");

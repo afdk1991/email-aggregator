@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { CanonicalMail, SearchHit } from '../types'
+import { Icon } from './Icon'
 
 interface Props {
   mail?: CanonicalMail | null
@@ -19,14 +20,43 @@ function fmtDate(ts: number): string {
 // 仅当存在权威 mail 时提供「标记已读/未读」「删除」操作。
 export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
 
-  // Esc 关闭模态（仅在打开时注册监听，避免全局常驻）
+  // Esc 关闭模态 + Tab 焦点陷阱（仅在打开时注册监听，避免全局常驻）
   useEffect(() => {
     if (!mail && !hit) return
     // 打开时聚焦关闭按钮（屏幕阅读器与键盘用户起点）
     closeRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      // 焦点陷阱：Tab / Shift+Tab 在模态内循环，禁止逃出到背景
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusables = modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+        const list = Array.from(focusables).filter((el) => !el.hasAttribute('disabled'))
+        if (list.length === 0) {
+          e.preventDefault()
+          return
+        }
+        const first = list[0]
+        const last = list[list.length - 1]
+        const active = document.activeElement as HTMLElement | null
+        if (e.shiftKey && active === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault()
+          first.focus()
+        } else if (!modalRef.current.contains(active)) {
+          // 焦点意外跑出（如初始态），拉回首个
+          e.preventDefault()
+          first.focus()
+        }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -45,6 +75,7 @@ export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete 
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div
+        ref={modalRef}
         className="modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -52,7 +83,7 @@ export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete 
         aria-labelledby="mail-detail-subject"
       >
         <button ref={closeRef} className="modal-close" onClick={onClose} aria-label="关闭详情对话框">
-          ×
+          <Icon name="x" size={20} />
         </button>
         <h3 id="mail-detail-subject" className="mail-detail-subject">{subject}</h3>
         <div className="mail-detail-meta">
@@ -61,7 +92,9 @@ export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete 
           <div>时间：{fmtDate(date)}</div>
           {mail?.hasAttachment && (
             <div className="attachments">
-              <div className="attach-title">📎 含 {mail.attachments?.length ?? 0} 个附件</div>
+              <div className="attach-title">
+                <Icon name="paperclip" size={14} /> 含 {mail.attachments?.length ?? 0} 个附件
+              </div>
               <ul className="attach-list">
                 {(mail.attachments ?? []).map((a, i) => (
                   <li key={i} className="attach-item">

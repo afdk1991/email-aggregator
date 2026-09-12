@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { Icon } from './components/Icon'
+import { NOTIF_META } from './components/NotifIcon'
 import {
   health,
   listMails,
@@ -30,15 +32,8 @@ const FALLBACK_ACCOUNTS: AccountInfo[] = [
   { id: 'acc_personal', unread: 0 },
 ]
 
-// toast 文案映射：覆盖全部 NotifyKind（new-mail / sync-state / mail-updated /
-// mail-deleted / error），未知 kind 回退显示 kind 本身，避免把正常事件误报成"错误"。
-const TOAST_LABELS: Record<string, string> = {
-  'new-mail': '📬 新邮件',
-  'sync-state': '🔄 同步',
-  'mail-updated': '📩 已读更新',
-  'mail-deleted': '🗑️ 邮件删除',
-  error: '⚠️ 错误',
-}
+// toast/通知图标+文案统一映射来自 NotifIcon.NOTIF_META（覆盖全部 NotifyKind，
+// 未知 kind 回退显示 kind 本身，避免把正常事件误报成"错误"）。
 
 export default function App() {
   const [accountId, setAccountId] = useState(DEFAULT_ACCOUNT)
@@ -48,6 +43,21 @@ export default function App() {
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 主题状态：初始值由 index.html 内联脚本根据 localStorage/prefers-color-scheme 设置
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof document !== 'undefined') {
+      return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+    }
+    return 'light'
+  })
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark'
+      document.documentElement.setAttribute('data-theme', next)
+      localStorage.setItem('theme', next)
+      return next
+    })
+  }, [])
 
   // 实时推送相关：wsState 三态（open/closed/reconnecting）更诚实反映连接状况
   const [wsState, setWsState] = useState<'open' | 'closed' | 'reconnecting'>('closed')
@@ -399,6 +409,15 @@ export default function App() {
       <header className="app-header">
         <h1>邮箱聚合平台</h1>
         <div className="header-status">
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+            title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+          >
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
+          </button>
           <HealthBadge ok={healthOk} />
           <span className={`ws-badge ${wsState === 'open' ? 'on' : wsState === 'reconnecting' ? 'reconnecting' : 'off'}`}>
             {wsState === 'open' ? '● 实时已连接' : wsState === 'reconnecting' ? '↻ 重连中…' : '○ 实时未连接'}
@@ -474,12 +493,14 @@ export default function App() {
               {credForm.open && (
                 <div className="cred-form" aria-label="设置凭据">
                   <input
+                    aria-label="用户名（授权码登录账号）"
                     placeholder="用户名（授权码登录账号，缺省用邮箱）"
                     value={credForm.username}
                     onChange={(e) => setCredForm((f) => ({ ...f, username: e.target.value }))}
                   />
                   <input
                     type="password"
+                    aria-label="授权码或密码"
                     placeholder="授权码 / 密码"
                     value={credForm.password}
                     onChange={(e) => setCredForm((f) => ({ ...f, password: e.target.value }))}
@@ -491,7 +512,7 @@ export default function App() {
               )}
               {cur.lastSyncError && !cur.syncing && (
                 <span className="sync-error" title={cur.lastSyncError}>
-                  ⚠ 上次同步失败
+                  <Icon name="warning" size={14} /> 上次同步失败
                 </span>
               )}
             </>
@@ -514,11 +535,13 @@ export default function App() {
       {addingAccount && (
         <section className="account-form" aria-label="添加账户">
           <input
+            aria-label="账户 ID"
             placeholder="账户 ID（如 acc_new）"
             value={accForm.id}
             onChange={(e) => setAccForm((f) => ({ ...f, id: e.target.value }))}
           />
           <select
+            aria-label="邮件协议提供商"
             value={accForm.provider}
             onChange={(e) => setAccForm((f) => ({ ...f, provider: e.target.value as Provider }))}
           >
@@ -529,16 +552,19 @@ export default function App() {
             <option value="graph">Microsoft 365 (Graph)</option>
           </select>
           <input
+            aria-label="邮箱地址"
             placeholder="邮箱（如 user@example.com）"
             value={accForm.email}
             onChange={(e) => setAccForm((f) => ({ ...f, email: e.target.value }))}
           />
           <input
+            aria-label="显示名"
             placeholder="显示名（可选）"
             value={accForm.displayName}
             onChange={(e) => setAccForm((f) => ({ ...f, displayName: e.target.value }))}
           />
           <input
+            aria-label="服务器地址"
             placeholder="服务器（可选，如 imap.139.com:993）"
             value={accForm.serverHost}
             onChange={(e) => setAccForm((f) => ({ ...f, serverHost: e.target.value }))}
@@ -556,7 +582,8 @@ export default function App() {
         {toasts.map((t, i) => (
           <div key={`${t.ts}-${i}`} className={`toast toast-${t.kind}`}>
             <strong>
-              {TOAST_LABELS[t.kind] ?? t.kind}
+              <Icon name={NOTIF_META[t.kind]?.icon ?? 'warning'} size={14} />
+              {NOTIF_META[t.kind]?.label ?? t.kind}
             </strong>
             <span>{t.preview || t.accountId}</span>
           </div>

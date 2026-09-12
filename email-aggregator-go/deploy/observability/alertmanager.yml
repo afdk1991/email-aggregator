@@ -1,0 +1,76 @@
+# =============================================================================
+# Alertmanager 路由配置（Phase 2 / 蓝图 §10 告警通知）
+# -----------------------------------------------------------------------------
+# 路由策略：
+#   - dev 默认：仅打印到日志（receiver: dev-null），不发送外部通知
+#   - prod 占位：路由 critical → webhook（预留，prod 启用后填写真实 URL）
+#
+# 启用 prod 路由：
+#   1) 取消下方 webhook receivers 的注释
+#   2) 替换 URL 为真实 incident 平台（飞书/钉钉/Slack/PagerDuty）
+#   3) 把 route.receiver 改为 critical-webhook
+#   4) 把 default-receiver 改为 prod-default
+# =============================================================================
+global:
+  resolve_timeout: 5m
+  # SMTP 占位（若启用邮件通知，填写真实 SMTP）
+  # smtp_smarthost: 'smtp.example.com:587'
+  # smtp_from: 'alerts@email-aggregator.local'
+
+# 默认接收器（dev 模式仅记录日志）
+receivers:
+  - name: dev-null
+    webhook_configs:
+      - url: http://127.0.0.1:9093/-/healthy
+        send_resolved: true
+
+  # ── 生产占位：critical 级别路由 ──
+  # 取消注释并填写真实 webhook URL 后启用
+  # - name: critical-webhook
+  #   webhook_configs:
+  #     - url: https://hooks.example.com/alerts/critical
+  #       send_resolved: true
+  #       http_config:
+  #         bearer_token: <your-token>
+
+  # ── 生产占位：warning 级别路由 ──
+  # - name: warning-webhook
+  #   webhook_configs:
+  #     - url: https://hooks.example.com/alerts/warning
+  #       send_resolved: true
+
+# 路由树
+route:
+  receiver: dev-null
+  group_by: [alertname, tenant, severity]
+  group_wait: 30s           # 首次告警后等待 30s 聚合同组
+  group_interval: 5m        # 同组聚合后每 5m 推送一次
+  repeat_interval: 4h       # 未解决告警 4h 重复推送
+  routes:
+    # critical 级别立即推送
+    - matchers:
+        - severity = critical
+      receiver: dev-null
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Phase 2 专项告警（OS/Citus 改造期间）
+    - matchers:
+        - phase = 2
+      receiver: dev-null
+      group_wait: 30s
+      repeat_interval: 30m
+
+    # 基础设施告警
+    - matchers:
+        - component = db
+      receiver: dev-null
+      group_wait: 1m
+
+# 抑制规则：critical 触发时抑制同租户的 warning
+inhibit_rules:
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
+    equal: [tenant]

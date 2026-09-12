@@ -206,3 +206,29 @@ var (
 	AIErrorsTotal    = defaultRegistry.Counter("ai_errors_total", "AI 调用失败总数", "tenant", "backend")
 	ConnectorErrors  = defaultRegistry.Counter("connector_errors_total", "连接器错误总数", "tenant", "account", "provider")
 )
+
+// Phase 2 / ADR-009 可观测性埋点（OpenSearch 检索拆分 + Citus 分片落地）。
+//
+// 覆盖维度：
+//   - OpenSearch Index/Search/Remove 操作计数与时延（按 tenant + status）
+//   - PG 元数据/游标查询计数与时延（按 tenant + op + status；Citus 分布键切换后用于观测 shard 路由延迟）
+//   - 索引重建工具 reindex 计数（按 source 索引 + status；用于 A.3 迁移进度观测）
+//
+// 设计原则：所有指标均以 tenant 为主标签，便于在 Grafana 按租户切片；
+// status 标签统一为 ok / error，便于计算成功率（rate(ok) / rate(ok+error)）。
+var (
+	// OpenSearch Index（写入一封邮件到 mail-<tid>）
+	OSIndexTotal       = defaultRegistry.Counter("os_index_total", "OpenSearch Index 操作总数", "tenant", "status")
+	OSIndexDurationMs  = defaultRegistry.Histogram("os_index_duration_ms", "OpenSearch Index 时延(毫秒)", "tenant")
+	// OpenSearch Search（关键词检索）
+	OSSearchTotal      = defaultRegistry.Counter("os_search_total", "OpenSearch Search 操作总数", "tenant", "status")
+	OSSearchDurationMs = defaultRegistry.Histogram("os_search_duration_ms", "OpenSearch Search 时延(毫秒)", "tenant")
+	// OpenSearch Remove（删除邮件索引文档）
+	OSRemoveTotal      = defaultRegistry.Counter("os_remove_total", "OpenSearch Remove 操作总数", "tenant", "status")
+	// PG 元数据/游标查询（Citus 分布键 = tenant_id，shard 路由延迟观测）
+	PgQueryTotal       = defaultRegistry.Counter("pg_query_total", "PG 查询总数", "tenant", "op", "status")
+	PgQueryDurationMs  = defaultRegistry.Histogram("pg_query_duration_ms", "PG 查询时延(毫秒)", "tenant", "op")
+	// 索引重建工具（A.3 reindex）
+	ReindexTotal       = defaultRegistry.Counter("reindex_total", "索引重建操作总数", "source_index", "status")
+	ReindexDocs        = defaultRegistry.Counter("reindex_docs_total", "索引重建迁移文档总数", "source_index")
+)

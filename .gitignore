@@ -38,3 +38,27 @@ _inbox/
 .ci-logs/
 ts-integ.log
 ts-integ.err.log
+
+# ---------- Phase 4 新增：Keycloak 联调 / Docker 卷 ----------
+.tmp_*/
+**/.tmp_*/
+email-aggregator-go/.tmp_probe/
+email-aggregator-go/.tmp_q/
+
+# ---------- IDE / 工具 ----------
+.trae/
+.tmp_att/
+**/.edgeone/
+
+# ---------- Docker 卷（运行时数据，勿入库） ----------
+pgdata/
+miniodata/
+osdata/
+rpdata/
+cn_data/
+w1_data/
+w2_data/
+
+# ---------- 报告 / 临时产物 ----------
+*深度审计报告*.md
+邮箱聚合平台系统架构设计.md.bak

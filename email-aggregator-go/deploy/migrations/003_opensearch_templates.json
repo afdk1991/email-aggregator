@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "description": "Phase 2 / ADR-009 per-tenant 物理索引模板：所有 mail-<tenantId> 索引自动应用本模板",
+    "version": "1",
+    "created": "2026-09-11"
+  },
+  "index_patterns": ["mail-*"],
+  "template": {
+    "settings": {
+      "index.number_of_shards": 3,
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "1s"
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "tenantId":     { "type": "keyword" },
+        "accountId":    { "type": "keyword" },
+        "subject":      { "type": "text" },
+        "from":         { "type": "text" },
+        "bodyText":     { "type": "text" },
+        "internalDate": { "type": "long" }
+      }
+    },
+    "aliases": {
+      "mail-all": {}
+    }
+  },
+  "priority": 100,
+  "composed_of": []
+}

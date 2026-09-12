@@ -15,13 +15,13 @@
  * 所有适配器实现与 stub 完全相同的接口（MetadataStore / ContentStore / SearchIndex /
  * EventBus / Notifier），故替换编排/采集逻辑零改动。
  *
- * ── Phase 1+ 物理隔离（ADR-009）─────────────────────────────────────────────
- * 与 Go 当前 Phase 1（mail-<tid>-<accountId> 复合索引、对象存储 mail/<hash> 全局去重）不同，
- * TS PoC 直接落地 Phase 1+ 物理隔离，对应原 stub 中已声明的方向：
- *   - OpenSearch: mail-<tid> 单一租户索引（一租户一物理索引，跨账户在同一索引内以 accountId 过滤）
+ * ── Phase 2 / ADR-009 物理隔离（已落地，与 Go 对齐）────────────────────────
+ * Phase 2（2026-09-11 立项）将 Go 端的 mail-<tid>-<accountId> 复合索引重构为
+ * mail-<tid> per-tenant 物理索引、Citus 分布键切换为 tenant_id；TS PoC 与 Go 对齐：
+ *   - OpenSearch: mail-<tid> 单一租户索引（一租户一物理索引，跨账户在同一索引内以 accountId filter 过滤）
  *   - 对象存储:   tenant-<tid>/mail/<sha256>（每租户独立前缀，配合 KMS DEK 隔离）
  *   - KMS:        租户派生 KEK（envelope encryption），见 TenantKms 接口骨架
- *   - PG:         预留 tenant_id 列 + RLS（Citus 分布键切换为 tenant_id）
+ *   - PG:         tenant_id 列 + Citus 分布键 = tenant_id（一租户一 shard，跨租户无共享）
  */
 
 import type { AppConfig } from "../config.ts";
@@ -158,10 +158,10 @@ export async function Wire(cfg: IntegrationConfig): Promise<RealAdapters> {
 /**
  * PgMetadataStore 真实 PG 适配器（动态 import `pg`）。
  *
- * 表结构（与 Go 对齐 + Phase 1+ tenant_id 强隔离）：
+ * 表结构（与 Go 对齐 + Phase 2 tenant_id 强隔离）：
  *   mail_metadata(
  *     id TEXT PRIMARY KEY,              -- = CanonicalMail.idempotencyKey
- *     tenant_id TEXT NOT NULL,          -- ADR-009 逻辑隔离键 + Phase 1+ Citus 分布键
+ *     tenant_id TEXT NOT NULL,          -- ADR-009 逻辑隔离键 + Phase 2 Citus 分布键
  *     account_id TEXT NOT NULL,
  *     provider TEXT, folder TEXT, subject TEXT, from_addr TEXT,
  *     body_text TEXT, internal_date BIGINT, size_bytes INT,
@@ -173,10 +173,13 @@ export async function Wire(cfg: IntegrationConfig): Promise<RealAdapters> {
  *     PRIMARY KEY (tenant_id, account_id, folder)
  *   )
  *
- * Phase 1+ 物理隔离建议（#ts7 后续）：
+ * Phase 2 / ADR-009 已落地（对齐 Go 002_citus_sharding.sql）：
+ *   - Citus 分布键 = tenant_id（同租户邮件/账户共置同一 shard，跨租户无共享 shard）
+ *   - 所有查询必须带 WHERE tenant_id = ? 才能命中 colocation shard（本适配器已强制 tenant_id 前置过滤）
+ *
+ * Phase 2+ 后续建议（#ts7+）：
  *   - 启用 PG Row-Level Security：CREATE POLICY tenant_isolation ON mail_metadata
  *     USING (tenant_id = current_setting('app.tenant_id'));
- *   - Citus 分布键从 account_id 切换为 tenant_id（一租户一 shard）
  */
 export class PgMetadataStore implements MetadataStore, CursorStore {
   /** pg.Pool —— 类型擦除以避免静态依赖；运行时由 NewPgMetadataStore 注入 */
@@ -418,17 +421,18 @@ function sha256Hex(buf: Buffer): string {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// OpenSearch 检索索引（SearchIndex，Phase 1+ 物理隔离：mail-<tid> 单一租户索引）
+// OpenSearch 检索索引（SearchIndex，Phase 2 / ADR-009：mail-<tid> 单一租户索引）
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
  * OpenSearchIndex 真实索引适配器（fetch-based REST，无强依赖客户端库）。
  *
- * Phase 1+ 物理隔离：index = `mail-<tenantId>`（一租户一物理索引），
- * 跨账户在同一索引内以 accountId 过滤（避免 mail-<tid>-<acc> 索引膨胀）。
- *
- * 与 Go 当前 Phase 1（mail-<tid>-<accountId> 复合索引）不同——TS PoC 直接落地 Phase 1+，
- * 对应 src/search/index.ts stub 中已声明的 `mail-<tid>` 方向。
+ * Phase 2 / ADR-009：index = `mail-<tenantId>`（一租户一物理索引），
+ * 跨账户在同一索引内以 bool.filter.term.accountId 过滤（避免 mail-<tid>-<acc> 索引膨胀）。
+ * 与 Go src/search/index.go + src/integration/integration.go 完全对齐：
+ *   - Index:  POST /mail-<tid>/_doc/<idempotencyKey>，文档字段含 tenantId/accountId
+ *   - Search: POST /mail-<tid>/_search，query.bool.filter.term.accountId + multi_match
+ *   - filter（不参与算分）比 must 更高效，与 Go 实现一致
  *
  * 实现策略：直接走 OpenSearch REST API（fetch），无需 `@opensearch-project/opensearch` 客户端
  * —— PoC 零依赖运行；生产可替换为官方客户端以获得连接池 / 重试 / 类型提示。
@@ -481,7 +485,7 @@ export class OpenSearchIndex implements SearchIndex {
     }
   }
 
-  /** Phase 1+：索引名 = mail-<tenantId>，跨账户在同一索引内以 accountId 过滤 */
+  /** Phase 2 / ADR-009：索引名 = mail-<tenantId>，跨账户在同一索引内以 accountId filter 过滤 */
   private indexName(tenantId: string): string {
     return `mail-${sanitizeIndex(Resolve(tenantId))}`;
   }
@@ -520,12 +524,16 @@ export class OpenSearchIndex implements SearchIndex {
   async search(tenantId: string, accountId: string, query: string, limit: number): Promise<SearchHit[]> {
     const tid = Resolve(tenantId);
     const idx = this.indexName(tid);
+    // Phase 2 / ADR-009（与 Go src/search/index.go 对齐）：
+    //   - bool.filter.term.accountId：账户精确过滤，不参与算分（filter context 缓存友好）
+    //   - bool.must.multi_match：subject/from/bodyText 全文检索
+    //   - 物理索引 mail-<tid> 已限定租户，accountId filter 是账户级双保险
     const body = {
       size: limit,
       query: {
         bool: {
+          filter: [{ term: { accountId } }],
           must: [
-            { term: { accountId } },
             { multi_match: { query, fields: ["subject", "from", "bodyText"] } },
           ],
         },

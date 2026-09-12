@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react'
+import { Icon } from './Icon'
 
 interface Props {
   children: ReactNode
@@ -32,7 +33,9 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="error-boundary" role="alert">
-          <h2>⚠️ 页面出错</h2>
+          <h2>
+            <Icon name="warning" size={20} /> 页面出错
+          </h2>
           <p className="error-boundary-msg">{this.state.message || '发生未知错误'}</p>
           <button onClick={this.handleRetry}>重试</button>
         </div>

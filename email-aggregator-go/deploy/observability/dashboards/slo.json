@@ -1,0 +1,298 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "SLO/SLI 仪表板：4 个核心 SLO 燃烧率（同步成功率/检索 P95/摄取吞吐/AI 调用成功率）",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 200,
+      "title": "SLO 总览（30 天窗口）",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red"},
+              {"color": "yellow", "value": 95},
+              {"color": "green", "value": 99}
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 1},
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "100 * (1 - sum(rate(sync_syncs_total{status=\"error\"}[30d])) / sum(rate(sync_syncs_total[30d])))",
+          "legendFormat": "Sync Success Rate",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO 1：同步成功率（≥ 99%）",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red"},
+              {"color": "yellow", "value": 300},
+              {"color": "green", "value": 500}
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 1},
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(os_search_duration_ms_count[30d])) by (le))",
+          "legendFormat": "Search P95",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO 2：检索 P95 < 500ms",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red"},
+              {"color": "yellow", "value": 10},
+              {"color": "green", "value": 100}
+            ]
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 1},
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(ingest_mails_total{status=\"ok\"}[30d]))",
+          "legendFormat": "Ingest Rate",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO 3：摄取吞吐 ≥ 100 封/s",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red"},
+              {"color": "yellow", "value": 90},
+              {"color": "green", "value": 95}
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 1},
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "100 * (1 - sum(rate(ai_calls_total{allowed=\"false\"}[30d])) / sum(rate(ai_calls_total[30d])))",
+          "legendFormat": "AI Success Rate",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO 4：AI 调用成功率 ≥ 95%",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+      "id": 201,
+      "title": "SLO 燃烧率（Burn Rate）",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
+      "id": 5,
+      "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "bottom"}},
+      "targets": [
+        {
+          "expr": "(sum(rate(os_search_duration_ms_count[1h])) - sum(rate(os_search_duration_ms_bucket{le=\"500\"}[1h]))) / sum(rate(os_search_duration_ms_count[1h]))",
+          "legendFormat": "检索燃烧率（1h）",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(sync_syncs_total{status=\"error\"}[1h])) / sum(rate(sync_syncs_total[1h]))",
+          "legendFormat": "同步错误率（1h）",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(ingest_mails_total{status=\"error\"}[1h])) / sum(rate(ingest_mails_total[1h]))",
+          "legendFormat": "摄取错误率（1h）",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(ai_calls_total{allowed=\"false\"}[1h])) / sum(rate(ai_calls_total[1h]))",
+          "legendFormat": "AI 失败率（1h）",
+          "refId": "D"
+        }
+      ],
+      "title": "SLO 燃烧率（1h 窗口）",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+      "id": 202,
+      "title": "时延分桶分布",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "stacking": {"mode": "normal", "group": "A"},
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 19},
+      "id": 6,
+      "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "bottom"}},
+      "targets": [
+        {
+          "expr": "sum(rate(os_search_duration_ms_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OpenSearch 检索时延分桶",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "stacking": {"mode": "normal", "group": "A"},
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 19},
+      "id": 7,
+      "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "bottom"}},
+      "targets": [
+        {
+          "expr": "sum(rate(pg_query_duration_ms_bucket[5m])) by (le, op)",
+          "legendFormat": "{{op}} {{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PG 查询时延分桶（按 op）",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["email-aggregator", "phase2", "slo"],
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "邮箱聚合平台 - SLO/SLI",
+  "uid": "email-agg-slo",
+  "version": 1
+}

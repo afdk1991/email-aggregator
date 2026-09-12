@@ -1,8 +1,12 @@
-//go:build integration
+//go:build integration && !sync_worker && !ingest_worker && !search_service
 
 // Command server_integration 真实集成版常驻服务（构建标签 integration 下才编译）。
 // 启动后：REST（健康/邮件/检索）+ WebSocket（实时推送）同端口；
 // Kafka 的 notifications 主题实时转发到 WS 客户端。
+//
+// Phase 2 / 蓝图 §11 服务拆分后，本入口为「单进程一体化模式」——当未启用
+// sync_worker / ingest_worker / search_service 任一额外标签时编译。
+// 拆分模式分别见 cmd/sync_worker.go / cmd/ingest_worker.go / cmd/search_service.go。
 //
 // 运行：
 //
@@ -17,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"email-aggregator-go/src/aigateway"
@@ -31,27 +34,6 @@ import (
 	"email-aggregator-go/src/observ"
 	"email-aggregator-go/src/tenant"
 )
-
-func env(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-// envPort 读取端口型环境变量；为空或非法时回退默认值，避免启动因配置笔误而失败。
-func envPort(key string, def int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 || n > 65535 {
-		fmt.Printf("[warn] %s=%q 非法，回退默认端口 %d\n", key, v, def)
-		return def
-	}
-	return n
-}
 
 func main() {
 	ctx := context.Background()
@@ -135,14 +117,21 @@ func main() {
 	syncer := newAccountSyncer(adapters.Bus, vault, adapters.Accounts, adapters.Metadata, connector.NewDefaultRegistry())
 
 	// REST + WS 同端口（含 AI 网关 /api/ai/chat、账户服务 /api/accounts、凭据/同步入口）
-	mux := http.NewServeMux()
-	mux.Handle("/", api.NewApiServer(adapters.Metadata, adapters.Index, adapters.Notifier, port).
+	// Phase 3 / ADR-009：可选挂载 OIDC SSO + RBAC 鉴权中间件。
+	// assembleAuthMiddleware 在 sso 构建标签下读取 OIDC_* 环境变量构造验签器；
+	// 未配置或非 sso 构建时返回 nil，服务器回退至 PoC 无鉴权模式（向后兼容）。
+	authMiddleware := assembleAuthMiddleware(ctx, adapters.Bus)
+	apiSrv := api.NewApiServer(adapters.Metadata, adapters.Index, adapters.Notifier, port).
 		WithAIGateway(aiRouter).
 		WithAccounts(adapters.Accounts).
 		WithCredentialVault(vault).
 		WithAccountSyncer(syncer).
-		WithObserv(observ.Default()).
-		Handler())
+		WithObserv(observ.Default())
+	if authMiddleware != nil {
+		apiSrv = apiSrv.WithAuth(authMiddleware)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/", apiSrv.Handler())
 
 	// 可观测性：Prometheus 抓取端点（对齐蓝图 §10 Prometheus + Grafana）。
 	// 与 /api/metrics（JSON 快照，供调试）并存；此处为 Prometheus 文本 exposition 格式。

@@ -3,9 +3,14 @@
 # 启动：cd deploy && docker compose up -d
 
 services:
+  # Phase 2 / ADR-009：postgres 切换为 citusdata/citus:12.1.3 镜像（PG 16 + Citus 12），
+  # 满足「审计数据按 tenantID 分区」硬约束；002_citus_sharding.sql 自动启用 Citus 扩展并
+  # 声明 mail_metadata / account_sync_cursor 为按 tenant_id 分布的分布式表。
+  # 单节点 coordinator 模式即可在 PoC 验证分片语义；生产需补充 worker 节点注册。
   postgres:
-    image: postgres:16
+    image: citusdata/citus:12.1.3
     restart: unless-stopped
+    # Citus 镜像默认包含 PG 16 entrypoint；环境变量、健康检查与原 postgres:16 兼容。
     environment:
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
@@ -99,11 +104,190 @@ services:
     profiles: ["tools"]
     networks: [default]
 
+  # ─────────────────────────────────────────────────────────────────
+  # Phase 2 / 蓝图 §10 监控与运维体系（Prometheus + Grafana + Alertmanager + exporters）
+  # 启动后默认自洽：Prometheus 抓取 /metrics，Grafana 自动加载 datasource + 3 个 dashboard，
+  # Alertmanager dev 模式仅记录日志（prod 路由占位见 observability/alertmanager.yml）。
+  # ─────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    restart: unless-stopped
+    # extra_hosts 让容器内可解析宿主机 host.docker.internal（Linux 需手动添加；
+    # Windows/Mac Docker Desktop 默认支持）。email-aggregator 当前在宿主机运行时
+    # Prometheus 抓 host.docker.internal:8080/metrics；若改为容器化，把 prometheus.yml
+    # 里的 target 改为 email-aggregator:8080。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports: ["${PROMETHEUS_PORT:-9091}:9090"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/rules/alerts.yml:ro
+      - ./observability/alertmanager.yml:/etc/prometheus/alertmanager.yml:ro
+      - promdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.enable-lifecycle
+    networks: [default]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    depends_on: [prometheus]
+    ports: ["${GRAFANA_PORT:-3001}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      # provisioning：启动时自动加载 datasource + dashboard provider
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      # dashboards：3 个核心仪表板（overview / slo / tenant）
+      - ./observability/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    networks: [default]
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    ports: ["${ALERTMANAGER_PORT:-9093}:9093"]
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanagerdata:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:9093
+    networks: [default]
+
+  # postgres-exporter：暴露 PG/Citus 指标（pg_up / pg_stat_* / citus_*）
+  # DATA_SOURCE_NAME 与 .env 的 PG_USER/PG_PASSWORD/PG_DATABASE 对齐
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${PG_USER:-agg}:${PG_PASSWORD:-agg-secret}@postgres:5432/${PG_DATABASE:-mailagg}?sslmode=disable"
+    ports: ["${POSTGRES_EXPORTER_PORT:-9187}:9187"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [default]
+
+  # kafka-exporter：暴露 Kafka broker / topic / 消费组 lag 指标
+  # 与 apache/kafka 兼容（kafka-go 协议）；目标 kafka:9092（容器内 broker 广播地址）
+  kafka-exporter:
+    image: danielqsj/kafka_exporter:v1.8.2
+    restart: unless-stopped
+    environment:
+      KAFKA_SERVER: "kafka:9092"
+    ports: ["${KAFKA_EXPORTER_PORT:-9404}:9404"]
+    depends_on: [kafka]
+    networks: [default]
+
+  # ─────────────────────────────────────────────────────────────────
+  # Phase 2 / 蓝图 §11 服务拆分：sync_worker / ingest_worker / search_service
+  # 三个独立 Go 进程，各自最小依赖、可独立扩容、故障隔离。
+  # 构建：docker compose build sync_worker ingest_worker search_service
+  # 启动：docker compose up -d sync_worker ingest_worker search_service
+  # ─────────────────────────────────────────────────────────────────
+
+  # sync_worker：订阅 sync-tasks → 邮件同步编排 → 发布 mail-ingested
+  # 依赖：PG（accounts + cursor）+ Kafka；不接 MinIO/OpenSearch/notifier
+  sync_worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: "integration,sync_worker"
+        BIN_NAME: "sync_worker"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      PG_DSN: "postgres://${PG_USER:-agg}:${PG_PASSWORD:-agg-secret}@postgres:5432/${PG_DATABASE:-mailagg}"
+      KAFKA_BROKERS: "kafka:9092"
+      OPENSEARCH_ADDR: "https://opensearch:9200"
+      OPENSEARCH_USER: "admin"
+      OPENSEARCH_PASS: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-Kp3mQ9@vL2*rT7xA8}"
+      SYNC_WORKER_GROUP: "sync-worker"
+      SYNC_METRICS_PORT: "8081"
+    ports: ["${SYNC_WORKER_PORT:-8081}:8081"]
+    networks: [default]
+
+  # ingest_worker：订阅 mail-ingested → 落 PG + MinIO + OpenSearch + 通知
+  # 依赖：PG + MinIO + OpenSearch + Kafka；不接 accounts/cursor
+  ingest_worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: "integration,ingest_worker"
+        BIN_NAME: "ingest_worker"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      opensearch:
+        condition: service_started
+      kafka:
+        condition: service_started
+    environment:
+      PG_DSN: "postgres://${PG_USER:-agg}:${PG_PASSWORD:-agg-secret}@postgres:5432/${PG_DATABASE:-mailagg}"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_BUCKET: "agg-mail"
+      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-agg}"
+      MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-agg-secret}"
+      MINIO_SECURE: "false"
+      OPENSEARCH_ADDR: "https://opensearch:9200"
+      OPENSEARCH_USER: "admin"
+      OPENSEARCH_PASS: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-Kp3mQ9@vL2*rT7xA8}"
+      KAFKA_BROKERS: "kafka:9092"
+      INGEST_WORKER_GROUP: "ingest-worker"
+      INGEST_METRICS_PORT: "8082"
+    ports: ["${INGEST_WORKER_PORT:-8082}:8082"]
+    networks: [default]
+
+  # search_service：HTTP 检索/邮件读写端点
+  # 依赖：PG + OpenSearch；不接 MinIO/Kafka/notifier（无状态只读）
+  search_service:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: "integration,search_service"
+        BIN_NAME: "search_service"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opensearch:
+        condition: service_started
+    environment:
+      PG_DSN: "postgres://${PG_USER:-agg}:${PG_PASSWORD:-agg-secret}@postgres:5432/${PG_DATABASE:-mailagg}"
+      OPENSEARCH_ADDR: "https://opensearch:9200"
+      OPENSEARCH_USER: "admin"
+      OPENSEARCH_PASS: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-Kp3mQ9@vL2*rT7xA8}"
+      SEARCH_PORT: "8083"
+    ports: ["${SEARCH_SERVICE_PORT:-8083}:8083"]
+    networks: [default]
+
 volumes:
   pgdata:
   miniodata:
   rpdata:
   osdata:
+  promdata:
+  grafanadata:
+  alertmanagerdata:
 
 networks:
   # mixmlaal SaaS 业务网络（external），让 Kafka 可被业务容器经 deploy-kafka-1 访问

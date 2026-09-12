@@ -7,8 +7,8 @@
  * 验证覆盖（对真实 PG / MinIO / OpenSearch / Kafka）：
  *   1. Wire() 真实装配（含 OpenSearch TLS 自签跳过 + 鉴权 ping）
  *   2. PG   upsertMail + getMail + listMails（真实落库/回读）
- *   3. MinIO put（Phase 1+ 前缀 tenant-<tid>/mail/<sha256>，租户内去重）
- *   4. OpenSearch index + search（mail-<tid> 单租户索引）
+ *   3. MinIO put（Phase 2 / ADR-009 前缀 tenant-<tid>/mail/<sha256>，租户内去重）
+ *   4. OpenSearch index + search（Phase 2 / ADR-009：mail-<tid> 单租户索引 + bool.filter.term.accountId）
  *   5. Kafka publish mail-ingested（生产者真实发送）
  *   6. 资源释放 close()
  */

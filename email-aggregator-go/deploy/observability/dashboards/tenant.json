@@ -1,0 +1,321 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "租户维度仪表板：按 tenant_id 切片 QPS / 错误率 / 时延 / 容量",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 300,
+      "title": "租户选择",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green"}, {"color": "yellow", "value": 0.01}, {"color": "red", "value": 0.05}]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 1},
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(os_search_total{tenant=\"$tenant\",status=\"error\"}[5m])) / sum(rate(os_search_total{tenant=\"$tenant\"}[5m]))",
+          "legendFormat": "Error Rate",
+          "refId": "A"
+        }
+      ],
+      "title": "当前租户检索错误率",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green"}, {"color": "yellow", "value": 300}, {"color": "red", "value": 500}]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 1},
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(os_search_duration_ms_count{tenant=\"$tenant\"}[5m])) by (le))",
+          "legendFormat": "P95",
+          "refId": "A"
+        }
+      ],
+      "title": "当前租户检索 P95",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green"}, {"color": "yellow", "value": 60000}, {"color": "red", "value": 120000}]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 1},
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(sync_duration_ms_count{tenant=\"$tenant\"}[5m])) by (le))",
+          "legendFormat": "P95",
+          "refId": "A"
+        }
+      ],
+      "title": "当前租户同步 P95",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 7},
+      "id": 301,
+      "title": "时延对比（当前租户 vs 全局）",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 4,
+      "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "bottom"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(os_search_duration_ms_count{tenant=\"$tenant\"}[5m])) by (le))",
+          "legendFormat": "{{tenant}} P95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(os_search_duration_ms_count[5m])) by (le))",
+          "legendFormat": "全局 P95",
+          "refId": "B"
+        }
+      ],
+      "title": "检索 P95：租户 vs 全局",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 5,
+      "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "bottom"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(pg_query_duration_ms_count{tenant=\"$tenant\"}[5m])) by (le, op))",
+          "legendFormat": "{{tenant}} {{op}} P95",
+          "refId": "A"
+        }
+      ],
+      "title": "PG 查询 P95（当前租户按 op）",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+      "id": 302,
+      "title": "租户排行（容量与负载）",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green"}, {"color": "yellow", "value": 100}, {"color": "red", "value": 500}]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 17},
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (tenant) (rate(os_search_total[5m])))",
+          "legendFormat": "{{tenant}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 租户检索 QPS",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green"}, {"color": "yellow", "value": 100}, {"color": "red", "value": 1000}]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 17},
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (tenant) (rate(ingest_mails_total[5m])))",
+          "legendFormat": "{{tenant}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 租户摄取吞吐",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 25},
+      "id": 303,
+      "title": "AI 调用按租户",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prom"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 26},
+      "id": 8,
+      "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "bottom"}},
+      "targets": [
+        {
+          "expr": "sum(rate(ai_calls_total{tenant=\"$tenant\"}[5m])) by (capability, backend, allowed)",
+          "legendFormat": "{{capability}} / {{backend}} / allowed={{allowed}}",
+          "refId": "A"
+        }
+      ],
+      "title": "当前租户 AI 调用（按能力/后端/允许）",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["email-aggregator", "phase2", "tenant"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": true, "text": "All", "value": "$__all"},
+        "datasource": {"type": "prometheus", "uid": "prom"},
+        "definition": "label_values(os_search_total, tenant)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "租户",
+        "multi": false,
+        "name": "tenant",
+        "options": [],
+        "query": {"qry": "label_values(os_search_total, tenant)"},
+        "refresh": 1,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "邮箱聚合平台 - 租户维度",
+  "uid": "email-agg-tenant",
+  "version": 1
+}

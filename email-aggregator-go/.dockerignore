@@ -1,0 +1,37 @@
+# Docker build context 排除项（减小镜像构建上下文体积）
+# Phase 2 / 蓝图 §11 服务拆分 Dockerfile 构建
+
+# 二进制构建产物
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 测试与覆盖
+*_test.go
+*_test.ts
+coverage.out
+coverage.html
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# 文档（镜像不需要）
+*.md
+docs/
+deploy/docs/
+
+# 部署配置（镜像内不包含，由 docker-compose env 注入）
+deploy/.env
+deploy/.env.*
+
+# 前端 / TS PoC（Go 镜像不需要）
+email-aggregator/
+node_modules/

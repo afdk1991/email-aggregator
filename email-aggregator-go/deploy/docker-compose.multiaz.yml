@@ -1,0 +1,210 @@
+# ============================================================================
+# docker-compose.multiaz.yml — Phase 3 双 AZ 模拟（高可用 + 灾备演练）
+#
+# 目的：在单机 Docker 内模拟「两个可用区」拓扑，验证：
+#   1. PostgreSQL 主从流复制（primary → replica）+ 手动 failover
+#   2. Kafka 多 broker 跨 AZ 部署 + 副本因子 2
+#   3. MinIO site replication 跨 AZ 双向同步
+#   4. 故障注入：杀掉 AZ-A 的服务 → 观察 AZ-B 接管 + RPO/RTO
+#
+# 拓扑：
+#   AZ-A (network: az_a)
+#     ├─ pg-primary   :5433 → PG 主，可写
+#     ├─ kafka-a      :9192 → Kafka broker-1（controller+broker）
+#     ├─ minio-a      :9100/9101 → MinIO site-1
+#   AZ-B (network: az_b)
+#     ├─ pg-replica   :5434 → PG 从，hot standby，failover 后升主
+#     ├─ kafka-b      :9193 → Kafka broker-2
+#     ├─ minio-b      :9102/9103 → MinIO site-2
+#
+# 两 AZ 之间通过 bridge 网络 az_xlink 互通（模拟跨 AZ 链路）。
+# 真实部署：把 az_a / az_b 替换为实际 AZ 子网，az_xlink 替换为 VPC peering。
+#
+# 启动：
+#   cd deploy
+#   docker compose -f docker-compose.multiaz.yml up -d
+#   # 初始化 MinIO site replication（首次启动后执行一次）：
+#   docker compose -f docker-compose.multiaz.yml exec minio-a mc admin replicate add \
+#     minio-a minio-b
+#   # 验证 PG 复制（在 primary 上建表，秒级同步到 replica）：
+#   docker compose -f docker-compose.multiaz.yml exec pg-primary \
+#     psql -U agg -d mailagg -c "SELECT * FROM pg_stat_replication;"
+# ============================================================================
+
+services:
+  # ── AZ-A: PostgreSQL primary ─────────────────────────────────────
+  pg-primary:
+    image: postgres:16
+    container_name: multiaz-pg-primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-agg}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-agg-secret}
+      POSTGRES_DB: ${PG_DATABASE:-mailagg}
+      # 流复制账号：replica/replica-secret（pg-replica 用此身份连接 primary 拉取 WAL）
+      POSTGRES_REPLICATION_USER: replica
+      POSTGRES_REPLICATION_PASSWORD: replica-secret
+    # 9100 复用为 PG primary 暴露端口：5433 供宿主连接，5432 容器内标准
+    ports: ["5433:5432"]
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "hot_standby=on"
+    volumes:
+      - pg_primary_data:/var/lib/postgresql/data
+      - ./multiaz/pg-primary-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-agg}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [az_a, az_xlink]
+
+  # ── AZ-B: PostgreSQL replica（hot standby，可读不可写）───────────
+  pg-replica:
+    image: postgres:16
+    container_name: multiaz-pg-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-agg}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-agg-secret}
+      POSTGRES_DB: ${PG_DATABASE:-mailagg}
+      # 复制源：指向 pg-primary，启动时用 pg_basebackup 拉全量 + 流增量
+      PG_PRIMARY_HOST: pg-primary
+      PG_PRIMARY_USER: replica
+      PG_PRIMARY_PASSWORD: replica-secret
+    ports: ["5434:5432"]
+    # 入口脚本做：pg_basebackup -R -D $PGDATA -h pg-primary -U replica
+    # 然后 postgres 启动即进入 hot standby 模式，只读。
+    # 文件 ./multiaz/pg-replica-entrypoint.sh 负责初始化 basebackup 与启停逻辑。
+    entrypoint: ["/entrypoint-replica.sh"]
+    volumes:
+      - pg_replica_data:/var/lib/postgresql/data
+      - ./multiaz/pg-replica-entrypoint.sh:/entrypoint-replica.sh:ro
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    healthcheck:
+      # replica 健康标志：pg_isready + 处于 recovery 模式
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-agg} && psql -U ${PG_USER:-agg} -d ${PG_DATABASE:-mailagg} -tAc \"SELECT pg_is_in_recovery()\" | grep -q '^t$'"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks: [az_b, az_xlink]
+
+  # ── AZ-A: Kafka broker 1（KRaft combined role）─────────────────
+  kafka-a:
+    image: apache/kafka:latest
+    container_name: multiaz-kafka-a
+    restart: unless-stopped
+    ports: ["9192:9092"]
+    environment:
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-a:9093,2@kafka-b:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://kafka-a:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://multiaz-kafka-a:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "2"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "2"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: "2"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "2"
+      KAFKA_MIN_INSYNC_REPLICAS: "1"
+    volumes: ["kafka_a_data:/tmp/kraft-combined-logs"]
+    networks: [az_a, az_xlink]
+
+  # ── AZ-B: Kafka broker 2 ──────────────────────────────────────
+  kafka-b:
+    image: apache/kafka:latest
+    container_name: multiaz-kafka-b
+    restart: unless-stopped
+    ports: ["9193:9092"]
+    environment:
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_NODE_ID: "2"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-a:9093,2@kafka-b:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://kafka-b:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://multiaz-kafka-b:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "2"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "2"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: "2"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "2"
+      KAFKA_MIN_INSYNC_REPLICAS: "1"
+    volumes: ["kafka_b_data:/tmp/kraft-combined-logs"]
+    networks: [az_b, az_xlink]
+
+  # ── AZ-A: MinIO site-1 ────────────────────────────────────────
+  minio-a:
+    image: minio/minio:latest
+    container_name: multiaz-minio-a
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agg}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agg-secret}
+    ports: ["9100:9000", "9101:9001"]
+    volumes: ["minio_a_data:/data"]
+    networks: [az_a, az_xlink]
+
+  # ── AZ-B: MinIO site-2 ────────────────────────────────────────
+  minio-b:
+    image: minio/minio:latest
+    container_name: multiaz-minio-b
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agg}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agg-secret}
+    ports: ["9102:9000", "9103:9001"]
+    volumes: ["minio_b_data:/data"]
+    networks: [az_b, az_xlink]
+
+  # ── mc 工具容器：仅在初始化 site replication 时启动 ───────────
+  # 使用：docker compose -f docker-compose.multiaz.yml run --rm mc \
+  #   mc admin replicate add minio-a minio-b
+  mc:
+    image: minio/mc:latest
+    depends_on: [minio-a, minio-b]
+    profiles: ["tools"]
+    entrypoint: [""]
+    environment:
+      MC_HOST_minio-a: "http://${MINIO_ROOT_USER:-agg}:${MINIO_ROOT_PASSWORD:-agg-secret}@minio-a:9000"
+      MC_HOST_minio-b: "http://${MINIO_ROOT_USER:-agg}:${MINIO_ROOT_PASSWORD:-agg-secret}@minio-b:9000"
+    networks: [az_xlink]
+
+volumes:
+  pg_primary_data:
+  pg_replica_data:
+  kafka_a_data:
+  kafka_b_data:
+  minio_a_data:
+  minio_b_data:
+
+networks:
+  # AZ-A 内部网络（实际部署：AZ-A 子网）
+  az_a:
+    driver: bridge
+  # AZ-B 内部网络（实际部署：AZ-B 子网）
+  az_b:
+    driver: bridge
+  # 跨 AZ 互通网络（实际部署：VPC peering / Transit Gateway）
+  # 仅用于 PoC 在单机模拟跨 AZ 通信；容器通过此网络跨 AZ 互访。
+  az_xlink:
+    driver: bridge

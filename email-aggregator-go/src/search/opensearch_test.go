@@ -2,6 +2,7 @@ package search
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +13,8 @@ import (
 )
 
 // TestOpenSearchIndex_RealImpl 用 httptest 验证默认（//go:build 无标签）OpenSearchIndex
-// 真实 REST 调用：索引名 tenant+account 隔离、Index/Search/Remove 请求路径正确、hits 解析正确。
+// 真实 REST 调用：Phase 2 / ADR-009 per-tenant 物理索引 mail-<tid>、Index/Search/Remove
+// 请求路径正确、Search 查询体含 accountId filter、hits 解析正确。
 func TestOpenSearchIndex_RealImpl(t *testing.T) {
 	var gotPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,9 +67,9 @@ func TestOpenSearchIndex_RealImpl(t *testing.T) {
 	}
 
 	want := []string{
-		"POST /mail-default-acc_demo/_doc/m1",
-		"DELETE /mail-default-acc_demo/_doc/m1",
-		"POST /mail-default-acc_demo/_search",
+		"POST /mail-default/_doc/m1",
+		"DELETE /mail-default/_doc/m1",
+		"POST /mail-default/_search",
 	}
 	if len(gotPaths) != len(want) {
 		t.Fatalf("got paths %v want %v", gotPaths, want)
@@ -76,5 +78,61 @@ func TestOpenSearchIndex_RealImpl(t *testing.T) {
 		if gotPaths[i] != want[i] {
 			t.Fatalf("path[%d]=%q want %q", i, gotPaths[i], want[i])
 		}
+	}
+}
+
+// TestOpenSearchIndex_PerTenantIndex 验证 Phase 2 / ADR-009 per-tenant 物理索引：
+// 不同 tenantID 路由到不同索引（mail-tenantA vs mail-tenantB），同一 tenant 多账户共用索引；
+// Search 查询体含 bool.filter.term.accountId 过滤项。
+func TestOpenSearchIndex_PerTenantIndex(t *testing.T) {
+	var capturedIndex, capturedSearchBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedIndex = r.URL.Path
+		if strings.HasSuffix(r.URL.Path, "/_search") {
+			b, _ := io.ReadAll(r.Body)
+			capturedSearchBody = string(b)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"hits": map[string]any{"hits": []any{}},
+		})
+	}))
+	defer srv.Close()
+
+	idx := NewOpenSearchIndex(srv.URL, "", "")
+
+	// 同一租户、两个账户 → 应该共用 mail-tenanta
+	mA := model.CanonicalMail{ID: "m1", AccountID: "acc_a", Subject: "subjA", InternalDate: 1}
+	mB := model.CanonicalMail{ID: "m2", AccountID: "acc_b", Subject: "subjB", InternalDate: 2}
+	if err := idx.Index("tenantA", mA); err != nil {
+		t.Fatalf("Index A err: %v", err)
+	}
+	if !strings.Contains(capturedIndex, "/mail-tenanta/_doc/m1") {
+		t.Fatalf("expected mail-tenanta index, got %s", capturedIndex)
+	}
+	if err := idx.Index("tenantA", mB); err != nil {
+		t.Fatalf("Index B err: %v", err)
+	}
+	if !strings.Contains(capturedIndex, "/mail-tenanta/_doc/m2") {
+		t.Fatalf("expected mail-tenanta index for second account, got %s", capturedIndex)
+	}
+
+	// 不同租户 → 应该路由到 mail-tenantb
+	mC := model.CanonicalMail{ID: "m3", AccountID: "acc_c", Subject: "subjC", InternalDate: 3}
+	if err := idx.Index("tenantB", mC); err != nil {
+		t.Fatalf("Index C err: %v", err)
+	}
+	if !strings.Contains(capturedIndex, "/mail-tenantb/_doc/m3") {
+		t.Fatalf("expected mail-tenantb index for different tenant, got %s", capturedIndex)
+	}
+
+	// Search 查询体必须含 accountId filter
+	if _, err := idx.Search("tenantA", "acc_a", "subj", 10); err != nil {
+		t.Fatalf("Search err: %v", err)
+	}
+	if !strings.Contains(capturedSearchBody, `"accountId"`) {
+		t.Fatalf("Search body missing accountId filter: %s", capturedSearchBody)
+	}
+	if !strings.Contains(capturedSearchBody, `"multi_match"`) {
+		t.Fatalf("Search body missing multi_match: %s", capturedSearchBody)
 	}
 }

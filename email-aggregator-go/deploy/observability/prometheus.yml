@@ -1,0 +1,121 @@
+# =============================================================================
+# Prometheus 抓取配置（Phase 2 / 蓝图 §10 监控与运维体系）
+# -----------------------------------------------------------------------------
+# 抓取目标（全部经 docker compose 网络，按 service:port 寻址）：
+#   - email-aggregator          :8080  /metrics         一体化模式（宿主机运行时用 host.docker.internal）
+#   - sync_worker               :8081  /metrics         同步编排器（订阅 sync-tasks）
+#   - ingest_worker             :8082  /metrics         摄取消费侧（订阅 mail-ingested）
+#   - search_service            :8083  /metrics         HTTP 检索服务
+#   - postgres-exporter         :9187  /metrics         PG/Citus 慢查询/连接数/Tuples
+#   - opensearch                :9200  /_plugins/_prometheus/metrics
+#                                                         集群健康/索引数/分片（需 admin 凭证）
+#   - kafka-exporter            :9404  /metrics         Kafka broker / topic / consumer lag
+#
+# 注：
+#   1) email-aggregator 一体化模式为宿主机运行（go run -tags integration ./cmd/server_integration.go），
+#      因此用 host.docker.internal:8080 抓取；若改为容器化部署，把 target 改为 email-aggregator:8080。
+#   2) Phase 2 服务拆分后，三个 worker 为 Docker 容器，直接用 service 名寻址。
+#   3) opensearch security 默认启用，需带 Authorization 头（Basic admin:<pass>），
+#      凭证与 deploy/.env 的 OPENSEARCH_INITIAL_ADMIN_PASSWORD 一致。
+#   4) kafka-exporter 与 apache/kafka 兼容（kafka-go 协议），目标 kafka:9092。
+# =============================================================================
+global:
+  scrape_interval: 15s          # 默认 15s，对齐 Grafana 默认时间窗口
+  evaluation_interval: 15s      # 告警规则评估周期
+  external_labels:
+    cluster: email-aggregator-go
+    env: dev
+
+rule_files:
+  - /etc/prometheus/rules/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # ── 应用进程：Go observ.PrometheusExposition 暴露的 /metrics ──
+  # Phase 2 埋点指标：sync_*/ingest_*/ai_*/os_*/pg_*/reindex_* 全部按 tenant 维度切片
+  - job_name: email-aggregator
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          service: email-aggregator
+          component: app
+    # 若改为容器化部署：targets: ["email-aggregator:8080"]
+
+  # ── Phase 2 / 蓝图 §11 服务拆分：worker 进程指标 ──
+  # 三个独立 Go 进程，各自暴露 /metrics 供 Prometheus 抓取。
+  # 一体化模式下这些进程不存在（由 server_integration 单进程覆盖全部指标），
+  # Prometheus 抓取失败仅显示 target down，不影响其他 job。
+
+  # sync_worker：同步编排器指标（sync_total / sync_duration_ms / sync_errors）
+  - job_name: sync_worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["sync_worker:8081"]
+        labels:
+          service: email-aggregator
+          component: sync_worker
+    # 宿主机运行时：targets: ["host.docker.internal:8081"]
+
+  # ingest_worker：摄取消费侧指标（ingest_total / ingest_duration_ms / os_index_duration_ms）
+  - job_name: ingest_worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ingest_worker:8082"]
+        labels:
+          service: email-aggregator
+          component: ingest_worker
+    # 宿主机运行时：targets: ["host.docker.internal:8082"]
+
+  # search_service：检索服务指标（os_search_duration_ms / pg_query_duration_ms）
+  - job_name: search_service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["search_service:8083"]
+        labels:
+          service: email-aggregator
+          component: search_service
+    # 宿主机运行时：targets: ["host.docker.internal:8083"]
+
+  # ── PostgreSQL / Citus exporter ──
+  # 指标：pg_up / pg_stat_database_tup_* / pg_stat_activity_count / citus_*
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          service: postgres
+          component: db
+
+  # ── OpenSearch Prometheus 插件 ──
+  # 指标：os_cluster_status / os_indices_* / os_nodes_*
+  - job_name: opensearch
+    metrics_path: /_plugins/_prometheus/metrics
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true   # 自签证书
+    basic_auth:
+      username: admin
+      password: Kp3mQ9@vL2*rT7xA8   # 与 .env OPENSEARCH_INITIAL_ADMIN_PASSWORD 一致
+    static_configs:
+      - targets: ["opensearch:9200"]
+        labels:
+          service: opensearch
+          component: search
+
+  # ── Kafka exporter ──
+  # 指标：kafka_brokers / kafka_topic_partitions / kafka_consumergroup_lag
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9404"]
+        labels:
+          service: kafka
+          component: mq
+
+  # ── Prometheus 自身 ──
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

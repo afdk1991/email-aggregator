@@ -46,6 +46,7 @@ import (
 	"email-aggregator-go/src/events"
 	"email-aggregator-go/src/model"
 	"email-aggregator-go/src/notify"
+	"email-aggregator-go/src/observ"
 	"email-aggregator-go/src/search"
 	"email-aggregator-go/src/store"
 	"email-aggregator-go/src/tenant"
@@ -123,10 +124,122 @@ func Wire(ctx context.Context, cfg Config) (*RealAdapters, error) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Phase 2 / 蓝图 §11 服务拆分：按服务边界裁剪装配
+// -------------------------------------------------------------------
+// sync_worker  仅需 Kafka bus + PG accounts/cursor（读账户注册表 + 游标持久化），
+//              不接 metadata/content/index/notifier（避免与 ingest_worker 双写竞争）。
+// ingest_worker 仅需 Kafka bus + PG metadata/content + OpenSearch index + notifier（落库 + 索引 + 通知），
+//              不接 accounts/cursor（账户状态由 sync_worker 维护）。
+// search_service 仅需 OpenSearch index + PG metadata + observ（检索 + 指标端点），
+//              不接 bus/content/notifier（无需事件订阅/通知/对象存储）。
+// ───────────────────────────────────────────────────────────────────────────
+
+// SyncAdapters sync_worker 进程所需的最小依赖集合。
+// 注：Cursor 与 Accounts 共享同一 PG 连接池（PgMetadataStore 实现同时满足两接口）。
+type SyncAdapters struct {
+	Bus      events.EventBus
+	Accounts store.AccountStore
+	Cursor   store.CursorStore
+}
+
+// WireSync 装配 sync_worker 专用依赖（仅 PG accounts + cursor + Kafka）。
+// 不建立 MinIO/OpenSearch/WS Hub 连接，启动更快、资源占用更少。
+func WireSync(ctx context.Context, cfg Config) (*SyncAdapters, error) {
+	pg, err := NewPgMetadataStore(ctx, cfg.PGDSN)
+	if err != nil {
+		return nil, fmt.Errorf("pg: %w", err)
+	}
+	accounts, err := NewPgAccountStore(ctx, cfg.PGDSN)
+	if err != nil {
+		return nil, fmt.Errorf("pg accounts: %w", err)
+	}
+	kafkaBus := NewKafkaAdapter(cfg.KafkaBrokers)
+	if cfg.KafkaDialAddr != "" {
+		dialTarget := cfg.KafkaDialAddr
+		kafkaBus = kafkaBus.WithDial(func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, dialTarget)
+		})
+	}
+	return &SyncAdapters{
+		Bus:      kafkaBus,
+		Accounts: accounts,
+		Cursor:   pg, // PgMetadataStore 同时实现 store.CursorStore
+	}, nil
+}
+
+// IngestAdapters ingest_worker 进程所需的最小依赖集合。
+type IngestAdapters struct {
+	Bus      events.EventBus
+	Metadata store.MetadataStore
+	Cursor   store.CursorStore
+	Content  store.ContentStore
+	Index    search.SearchIndex
+	Notifier notify.Notifier
+}
+
+// WireIngest 装配 ingest_worker 专用依赖（PG metadata + MinIO content + OpenSearch index + WS notifier + Kafka）。
+// 不建立 accounts 连接（账户状态由 sync_worker 维护，避免跨进程双写）。
+func WireIngest(ctx context.Context, cfg Config) (*IngestAdapters, error) {
+	pg, err := NewPgMetadataStore(ctx, cfg.PGDSN)
+	if err != nil {
+		return nil, fmt.Errorf("pg: %w", err)
+	}
+	obj, err := NewObjectContentStore(ctx, cfg.ObjectEndpoint, cfg.ObjectBucket,
+		cfg.ObjectAccessKey, cfg.ObjectSecretKey, cfg.ObjectSecure)
+	if err != nil {
+		return nil, fmt.Errorf("object: %w", err)
+	}
+	osIdx, err := NewOpenSearchIndex(cfg.OpenSearchAddr, cfg.OpenSearchUser, cfg.OpenSearchPass)
+	if err != nil {
+		return nil, fmt.Errorf("opensearch: %w", err)
+	}
+	hub := NewWsHub()
+	kafkaBus := NewKafkaAdapter(cfg.KafkaBrokers)
+	if cfg.KafkaDialAddr != "" {
+		dialTarget := cfg.KafkaDialAddr
+		kafkaBus = kafkaBus.WithDial(func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, dialTarget)
+		})
+	}
+	return &IngestAdapters{
+		Bus:      kafkaBus,
+		Metadata: pg,
+		Cursor:   pg,
+		Content:  obj,
+		Index:    osIdx,
+		Notifier: hub,
+	}, nil
+}
+
+// SearchAdapters search_service 进程所需的最小依赖集合。
+type SearchAdapters struct {
+	Metadata store.MetadataStore
+	Index    search.SearchIndex
+}
+
+// WireSearch 装配 search_service 专用依赖（PG metadata + OpenSearch index）。
+// 不订阅 Kafka（search 是同步拉模型，无需事件循环）；不建立 MinIO/notifier。
+func WireSearch(ctx context.Context, cfg Config) (*SearchAdapters, error) {
+	pg, err := NewPgMetadataStore(ctx, cfg.PGDSN)
+	if err != nil {
+		return nil, fmt.Errorf("pg: %w", err)
+	}
+	osIdx, err := NewOpenSearchIndex(cfg.OpenSearchAddr, cfg.OpenSearchUser, cfg.OpenSearchPass)
+	if err != nil {
+		return nil, fmt.Errorf("opensearch: %w", err)
+	}
+	return &SearchAdapters{
+		Metadata: pg,
+		Index:    osIdx,
+	}, nil
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // PostgreSQL 元数据 + 游标仓储（store.MetadataStore + store.CursorStore）
 // ───────────────────────────────────────────────────────────────────────────
 
-// PgMetadataStore 真实 PG 适配器：元数据按 account_id 分片（Citus），内容寻址键引用对象存储。
+// PgMetadataStore 真实 PG 适配器：Phase 2 / ADR-009 起元数据按 tenant_id 分片（Citus），
+// 跨租户查询必须带 WHERE tenant_id = ? 才能命中 colocation shard；单账户查询同样需要 tenant_id 前置过滤。
 type PgMetadataStore struct {
 	pool *pgxpool.Pool
 }
@@ -145,10 +258,28 @@ func cursorJSON(c model.SyncCursor) string {
 	return string(b)
 }
 
-// UpsertMail 幂等写入（按主键 id 去重；真实环境用 account_id 作 Citus 分布键，tenant_id 作逻辑隔离键）。
-// 注意：跨租户同 id 极罕见，若需严格隔离可将唯一约束改为 (tenant_id, account_id, id)；骨架阶段沿用 id 主键 + tenant_id 过滤。
+// pgObserve 记录 PG 查询指标（Phase 2 / ADR-009：Citus 分布键 = tenant_id，
+// shard 路由延迟观测）。op 标签区分 upsert_mail/get_mail/list_mails/count/
+// list_accounts/set_read/delete_mail/unread_count/get_cursor/put_cursor。
+// status 标签：ok / error，便于在 Grafana 计算成功率与错误率。
+func pgObserve(tenantID, op string, start time.Time, err error) {
+	status := "ok"
+	if err != nil {
+		status = "error"
+	}
+	observ.PgQueryTotal.Inc(map[string]string{"tenant": tenantID, "op": op, "status": status})
+	observ.PgQueryDurationMs.Observe(
+		map[string]string{"tenant": tenantID, "op": op},
+		float64(time.Since(start).Milliseconds()),
+	)
+}
+
+// UpsertMail 幂等写入（按主键 id 去重；Phase 2 / ADR-009 起 tenant_id 为 Citus 分布键，
+// 跨租户同 id 极罕见，若需严格隔离可将唯一约束改为 (tenant_id, account_id, id)）。
+// 注意：Citus 模式下 INSERT 自动按 tenant_id 路由到对应 shard，无需 app 层显式选路。
 func (s *PgMetadataStore) UpsertMail(tenantID string, m model.CanonicalMail) error {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	_, err := s.pool.Exec(context.Background(), `
 		INSERT INTO mail_metadata
 		  (id, tenant_id, account_id, provider, folder, subject, from_addr, body_text, internal_date, size_bytes, raw_object_key, cursor_json, read)
@@ -156,26 +287,32 @@ func (s *PgMetadataStore) UpsertMail(tenantID string, m model.CanonicalMail) err
 		ON CONFLICT (id) DO UPDATE SET subject = EXCLUDED.subject, from_addr = EXCLUDED.from_addr, body_text = EXCLUDED.body_text, internal_date = EXCLUDED.internal_date, size_bytes = EXCLUDED.size_bytes, provider = EXCLUDED.provider, folder = EXCLUDED.folder, raw_object_key = EXCLUDED.raw_object_key, read = EXCLUDED.read`,
 		m.ID, tenantID, m.AccountID, string(m.Provider), m.Folder, m.Subject,
 		m.From.Email, m.BodyText, m.InternalDate, m.SizeBytes, m.RawObjectKey, cursorJSON(m.Cursor), m.Read)
+	pgObserve(tenantID, "upsert_mail", start, err)
 	return err
 }
 
 // GetMail 按租户+主键取邮件（校验 tenant+account 归属）。
 func (s *PgMetadataStore) GetMail(tenantID, accountID, id string) (*model.CanonicalMail, error) {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	row := s.pool.QueryRow(context.Background(),
 		`SELECT id,tenant_id,account_id,provider,folder,subject,from_addr,body_text,internal_date,size_bytes,raw_object_key,cursor_json,read
 		 FROM mail_metadata WHERE id=$1 AND account_id=$2 AND tenant_id=$3`, id, accountID, tenantID)
-	return scanMail(row)
+	m, err := scanMail(row)
+	pgObserve(tenantID, "get_mail", start, err)
+	return m, err
 }
 
 // ListMails 列出租户内账户某文件夹邮件（按时间倒序，截取 limit）。
 func (s *PgMetadataStore) ListMails(tenantID, accountID, folder string, limit int) ([]model.CanonicalMail, error) {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT id,tenant_id,account_id,provider,folder,subject,from_addr,body_text,internal_date,size_bytes,raw_object_key,cursor_json,read
 		 FROM mail_metadata WHERE account_id=$1 AND folder=$2 AND tenant_id=$3
 		 ORDER BY internal_date DESC LIMIT $4`, accountID, folder, tenantID, limit)
 	if err != nil {
+		pgObserve(tenantID, "list_mails", start, err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -183,30 +320,38 @@ func (s *PgMetadataStore) ListMails(tenantID, accountID, folder string, limit in
 	for rows.Next() {
 		m, err := scanMail(rows)
 		if err != nil {
+			pgObserve(tenantID, "list_mails", start, err)
 			return nil, err
 		}
 		out = append(out, *m)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	pgObserve(tenantID, "list_mails", start, err)
+	return out, err
 }
 
 // Count 租户内账户邮件数。
 func (s *PgMetadataStore) Count(tenantID, accountID string) (int, error) {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	var n int
 	if err := s.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM mail_metadata WHERE account_id=$1 AND tenant_id=$2`, accountID, tenantID).Scan(&n); err != nil {
+		pgObserve(tenantID, "count", start, err)
 		return 0, err
 	}
+	pgObserve(tenantID, "count", start, nil)
 	return n, nil
 }
 
 // ListAccounts 列出租户内所有出现过的 account_id（演示用；生产可加 WHERE active 过滤）。
 func (s *PgMetadataStore) ListAccounts(tenantID string) ([]string, error) {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT DISTINCT account_id FROM mail_metadata WHERE tenant_id=$1 ORDER BY account_id`, tenantID)
 	if err != nil {
+		pgObserve(tenantID, "list_accounts", start, err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -214,66 +359,83 @@ func (s *PgMetadataStore) ListAccounts(tenantID string) ([]string, error) {
 	for rows.Next() {
 		var a string
 		if err := rows.Scan(&a); err != nil {
+			pgObserve(tenantID, "list_accounts", start, err)
 			return nil, err
 		}
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	pgObserve(tenantID, "list_accounts", start, err)
+	return out, err
 }
 
 // SetRead 设置邮件已读/未读（依赖 mail_metadata.read 列）。
 func (s *PgMetadataStore) SetRead(tenantID, accountID, id string, read bool) error {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	_, err := s.pool.Exec(context.Background(),
 		`UPDATE mail_metadata SET read=$4 WHERE id=$1 AND account_id=$2 AND tenant_id=$3`, id, accountID, tenantID, read)
+	pgObserve(tenantID, "set_read", start, err)
 	return err
 }
 
 // DeleteMail 物理删除邮件（演示用；生产建议软删除 + 审计）。
 func (s *PgMetadataStore) DeleteMail(tenantID, accountID, id string) error {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	_, err := s.pool.Exec(context.Background(),
 		`DELETE FROM mail_metadata WHERE id=$1 AND account_id=$2 AND tenant_id=$3`, id, accountID, tenantID)
+	pgObserve(tenantID, "delete_mail", start, err)
 	return err
 }
 
 // UnreadCount 租户内账户未读邮件数（read 为 NULL 视为未读）。
 func (s *PgMetadataStore) UnreadCount(tenantID, accountID string) (int, error) {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	var n int
 	if err := s.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM mail_metadata WHERE account_id=$1 AND tenant_id=$2 AND (read IS NULL OR read=false)`,
 		accountID, tenantID).Scan(&n); err != nil {
+		pgObserve(tenantID, "unread_count", start, err)
 		return 0, err
 	}
+	pgObserve(tenantID, "unread_count", start, nil)
 	return n, nil
 }
 
 // GetCursor 取同步游标。
 func (s *PgMetadataStore) GetCursor(tenantID, accountID, folder string) (model.SyncCursor, error) {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	var raw string
 	err := s.pool.QueryRow(context.Background(),
 		`SELECT cursor_json FROM account_sync_cursor WHERE account_id=$1 AND folder=$2 AND tenant_id=$3`,
 		accountID, folder, tenantID).Scan(&raw)
 	if err != nil {
-		return model.SyncCursor{}, nil // 无游标视为首次
+		// 无游标视为首次同步，记 ok（业务正常路径，非 PG 错误）
+		pgObserve(tenantID, "get_cursor", start, nil)
+		return model.SyncCursor{}, nil
 	}
 	var c model.SyncCursor
-	if err := json.Unmarshal([]byte(raw), &c); err != nil {
-		return model.SyncCursor{}, err
+	if uerr := json.Unmarshal([]byte(raw), &c); uerr != nil {
+		pgObserve(tenantID, "get_cursor", start, uerr)
+		return model.SyncCursor{}, uerr
 	}
+	pgObserve(tenantID, "get_cursor", start, nil)
 	return c, nil
 }
 
 // PutCursor 存同步游标（按 tenant+account+folder upsert）。
 func (s *PgMetadataStore) PutCursor(tenantID, accountID, folder string, c model.SyncCursor) error {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
 	_, err := s.pool.Exec(context.Background(), `
 		INSERT INTO account_sync_cursor (tenant_id, account_id, folder, cursor_json)
 		VALUES ($1,$2,$3,$4)
 		ON CONFLICT (tenant_id, account_id, folder) DO UPDATE SET cursor_json = EXCLUDED.cursor_json`,
 		tenantID, accountID, folder, cursorJSON(c))
+	pgObserve(tenantID, "put_cursor", start, err)
 	return err
 }
 
@@ -344,10 +506,11 @@ func (s *ObjectContentStore) Get(objectKey string) ([]byte, error) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// OpenSearch 检索索引（search.SearchIndex，按 accountId 路由索引）
+// OpenSearch 检索索引（search.SearchIndex，Phase 2 / ADR-009：按 tenantId 路由索引）
 // ───────────────────────────────────────────────────────────────────────────
 
-// OpenSearchIndex 真实索引适配器：index = mail-<accountId>，检索走 multi_match。
+// OpenSearchIndex 真实索引适配器：index = mail-<tenantId>，多账户共用同一租户索引，
+// accountId 作为字段过滤项（避免索引爆炸）；首次写入会自动应用 mail-* index template。
 type OpenSearchIndex struct {
 	client *opensearch.Client
 }
@@ -378,8 +541,8 @@ func sanitizeIndex(accountID string) string {
 	return strings.ToLower(strings.ReplaceAll(accountID, "@", "_"))
 }
 
-// Index 写入文档（索引按 租户+账户 隔离，index = mail-<tenantId>-<accountId>；
-// 生产应预先创建 index template + mapping）。
+// Index 写入文档（Phase 2 / ADR-009：索引按租户物理隔离，index = mail-<tenantId>，
+// accountId 作为字段保留以供查询时按账户过滤；index template 见 deploy/migrations/003_opensearch_templates.json）。
 func (s *OpenSearchIndex) Index(tenantID string, m model.CanonicalMail) error {
 	tenantID = tenant.Resolve(tenantID)
 	doc := map[string]any{
@@ -391,7 +554,7 @@ func (s *OpenSearchIndex) Index(tenantID string, m model.CanonicalMail) error {
 		"internalDate": m.InternalDate,
 	}
 	body, _ := json.Marshal(doc)
-	index := "mail-" + sanitizeIndex(tenantID) + "-" + sanitizeIndex(m.AccountID)
+	index := "mail-" + sanitizeIndex(tenantID)
 	req, _ := http.NewRequest(http.MethodPost,
 		fmt.Sprintf("/%s/_doc/%s", index, m.ID), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -407,16 +570,24 @@ func (s *OpenSearchIndex) Index(tenantID string, m model.CanonicalMail) error {
 	return nil
 }
 
-// Search 关键词检索（multi_match + 时间倒序，限定 租户+账户 索引）。
+// Search 关键词检索（Phase 2 / ADR-009：路由到 mail-<tenantId> 单租户索引，
+// multi_match 外层加 bool.filter.term.accountId 限定账户，物理隔离 + 字段过滤双保险）。
 func (s *OpenSearchIndex) Search(tenantID, accountID, query string, limit int) ([]search.SearchHit, error) {
 	tenantID = tenant.Resolve(tenantID)
-	index := "mail-" + sanitizeIndex(tenantID) + "-" + sanitizeIndex(accountID)
+	index := "mail-" + sanitizeIndex(tenantID)
 	body, _ := json.Marshal(map[string]any{
 		"size": limit,
 		"query": map[string]any{
-			"multi_match": map[string]any{
-				"query":  query,
-				"fields": []string{"subject", "from", "bodyText"},
+			"bool": map[string]any{
+				"filter": []map[string]any{
+					{"term": map[string]any{"accountId": accountID}},
+				},
+				"must": []map[string]any{
+					{"multi_match": map[string]any{
+						"query":  query,
+						"fields": []string{"subject", "from", "bodyText"},
+					}},
+				},
 			},
 		},
 		"sort": []any{map[string]any{"internalDate": "desc"}},
@@ -459,11 +630,12 @@ func (s *OpenSearchIndex) Search(tenantID, accountID, query string, limit int) (
 	return hits, nil
 }
 
-// Remove 按租户+账户+邮件 ID 删除索引文档（mail-<tenantId>-<accountId>/_doc/<id>）。
-// 404（文档不存在）视为成功，保证删除幂等。
+// Remove 按租户+邮件 ID 删除索引文档（Phase 2 / ADR-009：mail-<tenantId>/_doc/<id>）。
+// 404（文档不存在）视为成功，保证删除幂等；accountId 参数保留以兼容 SearchIndex 接口契约。
 func (s *OpenSearchIndex) Remove(tenantID, accountID, id string) error {
 	tenantID = tenant.Resolve(tenantID)
-	index := "mail-" + sanitizeIndex(tenantID) + "-" + sanitizeIndex(accountID)
+	_ = accountID // Phase 2 起 index 已不带 accountId，但仍校验 tenant 归属
+	index := "mail-" + sanitizeIndex(tenantID)
 	req, _ := http.NewRequest(http.MethodDelete,
 		fmt.Sprintf("/%s/_doc/%s", index, id), nil)
 	resp, err := s.client.Perform(req)

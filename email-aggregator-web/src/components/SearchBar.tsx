@@ -1,4 +1,5 @@
 import { forwardRef, useState } from 'react'
+import { Icon } from './Icon'
 
 interface Props {
   onSearch: (q: string) => void
@@ -10,9 +11,13 @@ const SearchBar = forwardRef<HTMLInputElement, Props>(({ onSearch }, ref) => {
 
   return (
     <div className="search-bar">
+      <span className="search-icon" aria-hidden="true">
+        <Icon name="search" size={16} />
+      </span>
       <input
         ref={ref}
         value={q}
+        aria-label="搜索邮件"
         placeholder="搜索邮件内容/主题/发件人 (按 / 聚焦)"
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => {
@@ -26,7 +31,7 @@ const SearchBar = forwardRef<HTMLInputElement, Props>(({ onSearch }, ref) => {
           onClick={() => { setQ(''); onSearch('') }}
           aria-label="清空搜索"
         >
-          ×
+          <Icon name="x" size={18} />
         </button>
       )}
       <button onClick={() => onSearch(q)}>搜索</button>

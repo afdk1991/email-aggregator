@@ -1,0 +1,43 @@
+# Phase 4 / ADR-009：Keycloak OIDC IdP 真实联调栈
+# 启动：cd deploy && docker compose -f docker-compose.keycloak.yml up -d
+# 默认监听 8080（与集成服务 HTTP_PORT 冲突时改为 8484）
+#
+# 联调路径：
+#   1) 启动后访问 http://localhost:8484/admin/master/console/
+#      用 KC_ADMIN_USER / KC_ADMIN_PASSWORD 登录
+#   2) Realm email-aggregator（含 client/users/mappers）由 realm-export.json 自动导入
+#   3) 集成服务读取 OIDC_* 环境变量（见 .env.keycloak）连入 Keycloak
+#   4) oidc.go 的 KeycloakVerifier 验签 id_token
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: ea-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # 开发模式（start-dev）：跳过 HTTPS/反代，PoC 直接 http
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8484
+      KC_HTTP_ENABLED: "true"
+      # 初始管理员账号（登录 /admin/master/console/ 用）
+      KEYCLOAK_ADMIN: ${KC_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin-secret}
+      # Realm 导入：把同目录 keycloak/realm-export.json 自动导入为 email-aggregator realm
+      KC_IMPORT: realm-export.json
+      # 内存与 Java（Keycloak 较重，PoC 给 1G 堆）
+      KC_DB: dev-mem
+      JAVA_OPTS: "-Xms512m -Xmx1024m"
+    ports:
+      - "${KC_PORT:-8484}:8080"
+    volumes:
+      # realm 自动导入（启动时一次性加载；后续修改在 admin console 直接编辑）
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    networks:
+      - default
+      - ea_net
+
+# Keycloak 需要与集成服务同一网络才能被 OIDC_ISSUER=http://keycloak:8080/realms/email-aggregator 访问
+networks:
+  ea_net:
+    driver: bridge

@@ -1,0 +1,229 @@
+# =============================================================================
+# 告警规则（Phase 2 / 蓝图 §10 SLI/SLO 体系）
+# -----------------------------------------------------------------------------
+# 指标来源：
+#   - email-aggregator /metrics (observ.PrometheusExposition)
+#   - postgres-exporter / kafka-exporter / opensearch Prometheus 插件
+#
+# 标签约定（与 src/observ/metrics.go 一致）：
+#   - tenant         租户 ID（按租户切片告警，定位多租户隔离问题）
+#   - status=ok|error 操作结果（用于计算成功率）
+#   - op             PG 操作类型（upsert_mail / get_mail / list_mails / count / ...）
+#   - account        账户 ID（同步/摄取/AI 调用按账户切片）
+#   - capability     AI 能力名（reply / summarize / translate / ...）
+#
+# 告警分级：
+#   - critical  : 影响核心功能，需立即处理（5m 内连续触发）
+#   - warning   : 趋势告警，关注但不立即处理（10m+ 触发）
+#   - info      : 信息性告警，主要用于容量规划
+# =============================================================================
+groups:
+  # ─────────────────────────────────────────────────────────────────
+  # SLO 燃烧率告警（蓝图 §10 SLI/SLO 体系）
+  #   - 检索 P95 < 500ms（Phase 2 退出标准）
+  #   - 同步 P95 < 60s（30m 内拉取一封邮件全流程）
+  #   - 摄取成功率 > 99%（每分钟错误 < 1）
+  #   - AI 调用成功率 > 95%
+  # ─────────────────────────────────────────────────────────────────
+  - name: slo-burn-rate
+    interval: 30s
+    rules:
+      # 检索 P95 时延超过 500ms 持续 5 分钟
+      - alert: SearchSLOP95High
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(os_search_duration_ms_count[5m])) by (le, tenant)
+          ) > 500
+        for: 5m
+        labels:
+          severity: critical
+          slo: search-p95
+        annotations:
+          summary: "检索 P95 时延超过 500ms（租户 {{ $labels.tenant }}）"
+          description: |
+            os_search_duration_ms P95 = {{ $value }}ms > 500ms
+            持续 5 分钟，可能原因：
+              1) OpenSearch 单租户索引过大，未分片或副本不足
+              2) multi_match 查询未走 filter context（accountId 过滤）
+              3) JVM heap 不足或 GC 频繁
+            处置：检查 mail-{{ $labels.tenant }} 索引文档数与查询 profile
+
+      # 同步 P95 时延超过 60s 持续 5 分钟
+      - alert: SyncSLOP95High
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(sync_duration_ms_count[5m])) by (le, tenant)
+          ) > 60000
+        for: 5m
+        labels:
+          severity: critical
+          slo: sync-p95
+        annotations:
+          summary: "同步 P95 时延超过 60s（租户 {{ $labels.tenant }}）"
+          description: |
+            sync_duration_ms P95 = {{ $value }}ms > 60000ms
+            可能原因：上游 IMAP/Graph 限流 / 单账户邮件量大 / 网络抖动
+
+      # 摄取错误率 > 1/min 持续 5 分钟
+      - alert: IngestErrorsHigh
+        expr: |
+          sum(rate(ingest_mails_total{status="error"}[5m])) by (tenant) > 1
+        for: 5m
+        labels:
+          severity: critical
+          slo: ingest-success-rate
+        annotations:
+          summary: "摄取错误率过高（租户 {{ $labels.tenant }}）"
+          description: |
+            错误速率 = {{ $value }}/s > 1/s
+            检查：连接器拉取的 raw 邮件格式 / MinIO 写入失败 / OpenSearch Index 失败
+
+      # AI 调用错误率 > 5% 持续 10 分钟
+      - alert: AICallErrorsHigh
+        expr: |
+          sum(rate(ai_calls_total{allowed="false"}[10m])) by (tenant, capability)
+            / sum(rate(ai_calls_total[10m])) by (tenant, capability) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          slo: ai-success-rate
+        annotations:
+          summary: "AI 调用失败率 > 5%（{{ $labels.capability }}，租户 {{ $labels.tenant }}）"
+          description: |
+            可能原因：AI 后端不可用 / 配额耗尽 / 脱敏规则触发 / 用户未授权
+
+  # ─────────────────────────────────────────────────────────────────
+  # 基础设施告警（PG / OpenSearch / Kafka）
+  # ─────────────────────────────────────────────────────────────────
+  - name: infra
+    interval: 30s
+    rules:
+      # PG 不可用
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: db
+        annotations:
+          summary: "PostgreSQL 不可用"
+          description: "postgres-exporter 无法连接 PG；检查 Citus 容器健康状态"
+
+      # PG 活跃连接数 > 80
+      - alert: PostgresConnectionsHigh
+        expr: sum(pg_stat_activity_count) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: db
+        annotations:
+          summary: "PG 活跃连接数过高（{{ $value }}）"
+          description: "考虑引入 PgBouncer 连接池或扩容 Citus coordinator"
+
+      # Citus 分布键偏离 ADR-009（tenant_id）
+      # 注：postgres-exporter 不直接暴露分布键，但通过自定义查询可监控；
+      # 此处仅占位，需在 postgres-exporter 的 queries.yaml 注册自定义查询
+      - alert: CitusShardSkew
+        expr: |
+          avg by (shard_id) (citus_shard_size_bytes)
+            / on(shard_id)
+          avg(citus_shard_size_bytes) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+          component: db
+        annotations:
+          summary: "Citus 分片大小不均（某 shard 偏离均值 > 50%）"
+          description: "运行 SELECT rebalance_table_shards('mail_metadata'); 重平衡"
+
+      # OpenSearch 集群红色
+      - alert: OpenSearchRed
+        expr: os_cluster_status{cluster="cluster"} == 3
+        for: 2m
+        labels:
+          severity: critical
+          component: search
+        annotations:
+          summary: "OpenSearch 集群状态 RED"
+          description: "有主分片丢失，邮件检索将部分失败；检查容器日志与磁盘"
+
+      # OpenSearch 索引文档数过多（> 500w 需关注分片）
+      - alert: OpenSearchIndexLarge
+        expr: |
+          os_index_doc_count > 5000000
+        for: 10m
+        labels:
+          severity: info
+          component: search
+        annotations:
+          summary: "OpenSearch 单索引文档数 > 500w（{{ $labels.index }}）"
+          description: "考虑调整 mail-* 索引模板 number_of_shards 增加分片"
+
+      # Kafka 消费组 lag 过大
+      - alert: KafkaLagHigh
+        expr: |
+          sum by (consumergroup, topic) (kafka_consumergroup_lag) > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: mq
+        annotations:
+          summary: "Kafka 消费组 lag > 10000（{{ $labels.topic }}）"
+          description: |
+            可能原因：sync/ingest worker 处理慢 / worker 实例数不足 / 单分区瓶颈
+            处置：扩容 worker 副本 / 提升 partitions / 优化单消息处理时延
+
+      # Kafka broker 不可用
+      - alert: KafkaBrokerDown
+        expr: kafka_brokers < 1
+        for: 1m
+        labels:
+          severity: critical
+          component: mq
+        annotations:
+          summary: "Kafka broker 不可达"
+          description: "kafka-exporter 无法连接 broker；检查 apache/kafka 容器"
+
+  # ─────────────────────────────────────────────────────────────────
+  # Phase 2 OpenSearch/Citus 改造专项告警
+  # ─────────────────────────────────────────────────────────────────
+  - name: phase2-specific
+    interval: 30s
+    rules:
+      # OpenSearch Index 操作错误率 > 1%
+      - alert: OSIndexErrorRateHigh
+        expr: |
+          sum(rate(os_index_total{status="error"}[5m])) by (tenant)
+            / sum(rate(os_index_total[5m])) by (tenant) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          phase: "2"
+        annotations:
+          summary: "OpenSearch Index 错误率 > 1%（租户 {{ $labels.tenant }}）"
+          description: "mail-{{ $labels.tenant }} 索引写入失败；检查 mapping / 磁盘满 / mapping 冲突"
+
+      # PG 查询错误率 > 1%
+      - alert: PgQueryErrorRateHigh
+        expr: |
+          sum(rate(pg_query_total{status="error"}[5m])) by (tenant, op)
+            / sum(rate(pg_query_total[5m])) by (tenant, op) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          phase: "2"
+        annotations:
+          summary: "PG 查询错误率 > 1%（{{ $labels.op }}，租户 {{ $labels.tenant }}）"
+          description: |
+            Citus 分布键 = tenant_id；若 op=list_mails 失败，可能 WHERE 缺失 tenant_id 过滤触发全表扫描
+
+      # 索引重建工具失败
+      - alert: ReindexFailed
+        expr: rate(reindex_total{status="error"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          phase: "2"
+        annotations:
+          summary: "索引重建工具失败（源索引 {{ $labels.source_index }}）"
+          description: "检查 OpenSearch scroll API 与 bulk 响应；可重跑（幂等）"

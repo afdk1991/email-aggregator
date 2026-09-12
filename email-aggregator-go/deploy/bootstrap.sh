@@ -174,6 +174,45 @@ for t in sync-tasks mail-ingested mail-index notifications audit; do
 done
 ok "Kafka 主题就绪（已存在则忽略；已开启 auto-create 作为兜底）"
 
+# ── 6) 监控栈（Phase 2 / 蓝图 §10 Prometheus + Grafana + Alertmanager + exporters）──
+info "等待监控栈就绪（Prometheus / Grafana / Alertmanager / postgres-exporter / kafka-exporter）…"
+
+# Prometheus
+wait_port localhost "${PROMETHEUS_PORT:-9091}" 60 2>/dev/null \
+  && ok "Prometheus 端口可达（${PROMETHEUS_PORT:-9091}）" \
+  || warn "Prometheus 端口 ${PROMETHEUS_PORT:-9091} 不可达（监控告警将无法抓取）"
+
+# Grafana（启动较慢，给 90s）
+for i in $(seq 1 90); do
+  if $COMPOSE exec -T grafana wget -qO- http://localhost:3000/api/health >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+$COMPOSE exec -T grafana wget -qO- http://localhost:3000/api/health 2>&1 | sed 's/^/    /' \
+  && ok "Grafana 就绪（admin / ${GRAFANA_ADMIN_PASSWORD:-admin}，访问 http://localhost:${GRAFANA_PORT:-3001}）" \
+  || warn "Grafana 90s 内未就绪，可手动访问 http://localhost:${GRAFANA_PORT:-3001}"
+
+# Alertmanager
+wait_port localhost "${ALERTMANAGER_PORT:-9093}" 60 2>/dev/null \
+  && ok "Alertmanager 端口可达（${ALERTMANAGER_PORT:-9093}）" \
+  || warn "Alertmanager 端口 ${ALERTMANAGER_PORT:-9093} 不可达"
+
+# postgres-exporter
+wait_port localhost "${POSTGRES_EXPORTER_PORT:-9187}" 60 2>/dev/null \
+  && ok "postgres-exporter 端口可达（${POSTGRES_EXPORTER_PORT:-9187}）" \
+  || warn "postgres-exporter 端口 ${POSTGRES_EXPORTER_PORT:-9187} 不可达"
+
+# kafka-exporter
+wait_port localhost "${KAFKA_EXPORTER_PORT:-9404}" 60 2>/dev/null \
+  && ok "kafka-exporter 端口可达（${KAFKA_EXPORTER_PORT:-9404}）" \
+  || warn "kafka-exporter 端口 ${KAFKA_EXPORTER_PORT:-9404} 不可达"
+
+# 验证 Prometheus 抓取目标
+info "验证 Prometheus 抓取目标（/api/v1/targets）…"
+$COMPOSE exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/targets?state=active' 2>&1 \
+  | sed 's/^/    /' \
+  && ok "Prometheus 抓取目标已就绪" \
+  || warn "Prometheus targets 查询失败，可手动访问 http://localhost:${PROMETHEUS_PORT:-9091}/targets"
+
 # ── 完成 ──
 echo
 ok "基础设施就绪度完成 ✅"
@@ -187,3 +226,9 @@ info "    GOPATH=\$PWD/.gopath GOMODCACHE=\$PWD/.gopath/pkg/mod GOCACHE=\$PWD/.g
 info "    go build -tags integration -o integ_server.exe ./cmd/"
 info "  服务运行在【宿主机】时须用 127.0.0.1:<已发布端口>（PG 15432 / MinIO 9000 / OpenSearch 9200 / Kafka 9092），"
 info "  且 KAFKA_BROKERS=127.0.0.1:9092（broker 已改为广播 localhost:9092，确保宿主客户端可重定向）。详见 INTEGRATION.md §5 与 §7。"
+info "  ── Phase 2 监控栈（蓝图 §10）已就绪："
+info "    Prometheus  : http://localhost:${PROMETHEUS_PORT:-9091}  （targets → http://localhost:${PROMETHEUS_PORT:-9091}/targets）"
+info "    Grafana     : http://localhost:${GRAFANA_PORT:-3001}     （admin / ${GRAFANA_ADMIN_PASSWORD:-admin}，自动加载 3 个 dashboard）"
+info "    Alertmanager: http://localhost:${ALERTMANAGER_PORT:-9093} （告警规则：SearchSLOP95High / SyncSLOP95High / IngestErrorsHigh / KafkaLagHigh）"
+info "    postgres-exporter: http://localhost:${POSTGRES_EXPORTER_PORT:-9187}/metrics"
+info "    kafka-exporter   : http://localhost:${KAFKA_EXPORTER_PORT:-9404}/metrics"

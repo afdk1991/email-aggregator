@@ -1,0 +1,19 @@
+# =============================================================================
+# Grafana Dashboard provisioning（Phase 2 / 蓝图 §10 Grafana）
+# -----------------------------------------------------------------------------
+# 启动时扫描 /var/lib/grafana/dashboards/ 加载所有 JSON 仪表板；
+# 仪表板文件由 docker-compose 卷挂载：deploy/observability/dashboards/*.json
+# =============================================================================
+apiVersion: 1
+
+providers:
+  - name: email-aggregator
+    orgId: 1
+    folder: Email Aggregator
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

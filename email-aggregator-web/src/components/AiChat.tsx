@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { aiChat } from '../api/client'
 import type { ChatMessage, ChatRequest } from '../types'
+import { Icon } from './Icon'
 
 interface Props {
   accountId: string
@@ -62,11 +63,22 @@ export default function AiChat({ accountId }: Props) {
       <div className="ai-input">
         <textarea
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          aria-label="输入 AI 问题"
           placeholder="输入问题…"
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              send()
+            }
+          }}
         />
-        <button onClick={send} disabled={busy}>
-          {busy ? '思考中…' : '发送'}
+        <button onClick={send} disabled={busy} aria-label="发送提问">
+          {busy ? '思考中…' : (
+            <>
+              发送 <Icon name="send" size={14} />
+            </>
+          )}
         </button>
       </div>
     </div>

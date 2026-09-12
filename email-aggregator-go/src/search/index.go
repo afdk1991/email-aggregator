@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"email-aggregator-go/src/model"
+	"email-aggregator-go/src/observ"
 	"email-aggregator-go/src/tenant"
 )
 
@@ -120,7 +121,8 @@ func (s *InMemorySearchIndex) Search(tenantID, accountID, query string, limit in
 func ns(tenantID, key string) string { return tenantID + "\x00" + key }
 
 // OpenSearchIndex 真实索引适配器（标准库 net/http 实现，零外部依赖）：
-// index = mail-<tenantId>-<accountId>，检索走 multi_match。
+// index = mail-<tenantId>（Phase 2 / ADR-009 严格按 per-tenant 物理索引落地），
+// 多账户共用同一租户索引，accountId 作为字段过滤项，避免 10 万账户 = 10 万索引爆炸。
 // 与 integration 包下的 OpenSearchIndex 语义一致，但本实现仅依赖标准库，
 // 默认构建即可编译（无需 opensearch-go），可在配置 OPENSEARCH_ADDR 后真正启用。
 type OpenSearchIndex struct {
@@ -148,9 +150,13 @@ func sanitizeIndex(name string) string {
 	return strings.ToLower(strings.ReplaceAll(name, "@", "_"))
 }
 
-// Index 写入文档（索引按 租户+账户 隔离，index = mail-<tenantId>-<accountId>）。
+// Index 写入文档（Phase 2 / ADR-009：索引按租户物理隔离，index = mail-<tenantId>，
+// accountId 作为字段保留以供查询时按账户过滤；首次写入会自动应用 mail-* index template）。
+// Phase 2 可观测性：埋点 os_index_total{tenant,status} + os_index_duration_ms{tenant}。
 func (s *OpenSearchIndex) Index(tenantID string, m model.CanonicalMail) error {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
+	labels := map[string]string{"tenant": tenantID}
 	doc := map[string]any{
 		"tenantId":     tenantID,
 		"accountId":    m.AccountID,
@@ -161,55 +167,87 @@ func (s *OpenSearchIndex) Index(tenantID string, m model.CanonicalMail) error {
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
+		observ.OSIndexTotal.Inc(withStatus(labels, "error"))
 		return err
 	}
-	index := "mail-" + sanitizeIndex(tenantID) + "-" + sanitizeIndex(m.AccountID)
+	index := "mail-" + sanitizeIndex(tenantID)
 	req, err := http.NewRequest(http.MethodPost, s.baseURL+"/"+index+"/_doc/"+m.ID, bytes.NewReader(body))
 	if err != nil {
+		observ.OSIndexTotal.Inc(withStatus(labels, "error"))
 		return err
 	}
 	s.setHeaders(req, "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
+		observ.OSIndexTotal.Inc(withStatus(labels, "error"))
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
+		observ.OSIndexTotal.Inc(withStatus(labels, "error"))
+		observ.OSIndexDurationMs.Observe(labels, float64(time.Since(start).Milliseconds()))
 		return fmt.Errorf("opensearch index status=%d body=%s", resp.StatusCode, b)
 	}
+	observ.OSIndexTotal.Inc(withStatus(labels, "ok"))
+	observ.OSIndexDurationMs.Observe(labels, float64(time.Since(start).Milliseconds()))
 	return nil
 }
 
-// Search 关键词检索（multi_match + 时间倒序，限定 租户+账户 索引）。
+// withStatus 返回带 status 标签的副本（避免污染原 labels map）。
+func withStatus(labels map[string]string, status string) map[string]string {
+	out := make(map[string]string, len(labels)+1)
+	for k, v := range labels {
+		out[k] = v
+	}
+	out["status"] = status
+	return out
+}
+
+// Search 关键词检索（Phase 2 / ADR-009：路由到 mail-<tenantId> 单租户索引，
+// 在 multi_match 外层加 bool.filter.term.accountId 限定账户，物理隔离 + 字段过滤双保险）。
+// Phase 2 可观测性：埋点 os_search_total{tenant,status} + os_search_duration_ms{tenant}。
 func (s *OpenSearchIndex) Search(tenantID, accountID, query string, limit int) ([]SearchHit, error) {
 	tenantID = tenant.Resolve(tenantID)
+	start := time.Now()
+	labels := map[string]string{"tenant": tenantID}
 	if limit <= 0 {
 		limit = 50
 	}
-	index := "mail-" + sanitizeIndex(tenantID) + "-" + sanitizeIndex(accountID)
+	index := "mail-" + sanitizeIndex(tenantID)
 	body, _ := json.Marshal(map[string]any{
 		"size": limit,
 		"query": map[string]any{
-			"multi_match": map[string]any{
-				"query":  query,
-				"fields": []string{"subject", "from", "bodyText"},
+			"bool": map[string]any{
+				"filter": []map[string]any{
+					{"term": map[string]any{"accountId": accountID}},
+				},
+				"must": []map[string]any{
+					{"multi_match": map[string]any{
+						"query":  query,
+						"fields": []string{"subject", "from", "bodyText"},
+					}},
+				},
 			},
 		},
 		"sort": []any{map[string]any{"internalDate": "desc"}},
 	})
 	req, err := http.NewRequest(http.MethodPost, s.baseURL+"/"+index+"/_search", bytes.NewReader(body))
 	if err != nil {
+		observ.OSSearchTotal.Inc(withStatus(labels, "error"))
 		return nil, err
 	}
 	s.setHeaders(req, "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
+		observ.OSSearchTotal.Inc(withStatus(labels, "error"))
 		return nil, err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
+		observ.OSSearchTotal.Inc(withStatus(labels, "error"))
+		observ.OSSearchDurationMs.Observe(labels, float64(time.Since(start).Milliseconds()))
 		return nil, fmt.Errorf("opensearch search status=%d body=%s", resp.StatusCode, b)
 	}
 	var parsed struct {
@@ -221,6 +259,8 @@ func (s *OpenSearchIndex) Search(tenantID, accountID, query string, limit int) (
 		} `json:"hits"`
 	}
 	if err := json.Unmarshal(b, &parsed); err != nil {
+		observ.OSSearchTotal.Inc(withStatus(labels, "error"))
+		observ.OSSearchDurationMs.Observe(labels, float64(time.Since(start).Milliseconds()))
 		return nil, err
 	}
 	hits := make([]SearchHit, 0, len(parsed.Hits.Hits))
@@ -235,28 +275,37 @@ func (s *OpenSearchIndex) Search(tenantID, accountID, query string, limit int) (
 			InternalDate: toInt64(h.Src["internalDate"]),
 		})
 	}
+	observ.OSSearchTotal.Inc(withStatus(labels, "ok"))
+	observ.OSSearchDurationMs.Observe(labels, float64(time.Since(start).Milliseconds()))
 	return hits, nil
 }
 
-// Remove 按租户+账户+邮件 ID 删除索引文档（mail-<tenantId>-<accountId>/_doc/<id>）。
-// 404（文档不存在）视为成功，保证删除幂等。
+// Remove 按租户+邮件 ID 删除索引文档（Phase 2 / ADR-009：mail-<tenantId>/_doc/<id>）。
+// 404（文档不存在）视为成功，保证删除幂等；accountId 参数保留以兼容 SearchIndex 接口契约。
+// Phase 2 可观测性：埋点 os_remove_total{tenant,status}。
 func (s *OpenSearchIndex) Remove(tenantID, accountID, id string) error {
 	tenantID = tenant.Resolve(tenantID)
-	index := "mail-" + sanitizeIndex(tenantID) + "-" + sanitizeIndex(accountID)
+	_ = accountID // Phase 2 起 index 已不带 accountId，但仍校验 tenant 归属
+	labels := map[string]string{"tenant": tenantID}
+	index := "mail-" + sanitizeIndex(tenantID)
 	req, err := http.NewRequest(http.MethodDelete, s.baseURL+"/"+index+"/_doc/"+id, nil)
 	if err != nil {
+		observ.OSRemoveTotal.Inc(withStatus(labels, "error"))
 		return err
 	}
 	s.setHeaders(req, "")
 	resp, err := s.client.Do(req)
 	if err != nil {
+		observ.OSRemoveTotal.Inc(withStatus(labels, "error"))
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusNotFound {
 		b, _ := io.ReadAll(resp.Body)
+		observ.OSRemoveTotal.Inc(withStatus(labels, "error"))
 		return fmt.Errorf("opensearch delete status=%d body=%s", resp.StatusCode, b)
 	}
+	observ.OSRemoveTotal.Inc(withStatus(labels, "ok"))
 	return nil
 }
 

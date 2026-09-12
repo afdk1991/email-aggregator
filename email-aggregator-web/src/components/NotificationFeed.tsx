@@ -1,18 +1,13 @@
 import type { NotificationPayload } from '../types'
+import { Icon } from './Icon'
+import { NOTIF_META } from './NotifIcon'
 
 interface Props {
   items: NotificationPayload[]
 }
 
-const KIND_LABEL: Record<string, string> = {
-  'new-mail': '📬 新邮件',
-  'sync-state': '🔄 同步',
-  'mail-updated': '📩 已读更新',
-  'mail-deleted': '🗑️ 邮件删除',
-  error: '⚠️ 错误',
-}
-
 // 实时通知常驻面板：持续累积 WS 收到的事件（与瞬时 toast 并存），上限 20 条。
+// 图标+文案映射复用 NotifIcon.NOTIF_META 单一真相源，避免与 toast 定义不一致。
 export default function NotificationFeed({ items }: Props) {
   return (
     <div className="notif-feed">
@@ -21,13 +16,19 @@ export default function NotificationFeed({ items }: Props) {
         <p className="empty">暂无实时通知</p>
       ) : (
         <ul className="notif-list">
-          {items.map((n, i) => (
-            <li key={`${n.ts}-${i}`} className={`notif-item notif-${n.kind}`}>
-              <span className="notif-kind">{KIND_LABEL[n.kind] ?? n.kind}</span>
-              <span className="notif-text">{n.preview || n.accountId}</span>
-              <span className="notif-time">{new Date(n.ts * 1000).toLocaleTimeString()}</span>
-            </li>
-          ))}
+          {items.map((n, i) => {
+            const meta = NOTIF_META[n.kind]
+            return (
+              <li key={`${n.ts}-${i}`} className={`notif-item notif-${n.kind}`}>
+                <span className="notif-kind">
+                  {meta ? <Icon name={meta.icon} size={14} /> : null}
+                  {meta ? meta.label : n.kind}
+                </span>
+                <span className="notif-text">{n.preview || n.accountId}</span>
+                <span className="notif-time">{new Date(n.ts * 1000).toLocaleTimeString()}</span>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>
