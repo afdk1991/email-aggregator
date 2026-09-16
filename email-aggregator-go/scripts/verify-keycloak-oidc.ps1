@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Phase 4 / ADR-009：Keycloak OIDC 真实联调验证脚本
 # 前置：docker compose -f deploy/docker-compose.keycloak.yml --env-file deploy/.env.keycloak up -d
 # 用法：.\scripts\verify-keycloak-oidc.ps1

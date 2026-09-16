@@ -1,872 +1,1305 @@
+/* ============================================================================
+   邮箱聚合平台 · UI 样式表  v1.0 (Inbox Calm)
+   设计规范见《邮箱聚合平台-UI设计规范.md》
+   组织顺序：1 设计令牌 → 2 重置与基础元素 → 3 通用组件 → 4 布局骨架
+             → 5 业务模块 → 6 反馈层 → 7 暗色主题 → 8 响应式 → 9 无障碍/打印
+   铁律：组件样式只引用 Token，不出现裸色值（#fff / transparent / 遮罩除外）
+   ========================================================================= */
+
+/* ==========================================================================
+   1 设计令牌（单一真相源）
+   ========================================================================== */
 :root {
-  --bg: #f5f7fa;
+  /* ---- 间距尺度（4px 基线）---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* ---- 圆角尺度 ---- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ---- 字号与行高 ---- */
+  --fs-display: 24px;
+  --lh-display: 1.25;
+  --fs-h1: 18px;
+  --lh-h1: 1.4;
+  --fs-h2: 15px;
+  --lh-h2: 1.45;
+  --fs-h3: 13px;
+  --lh-h3: 1.5;
+  --fs-body: 14px;
+  --lh-body: 1.6;
+  --fs-sm: 13px;
+  --lh-sm: 1.55;
+  --fs-xs: 12px;
+  --lh-xs: 1.5;
+  --fs-2xs: 11px;
+  --lh-2xs: 1.4;
+
+  /* ---- 中性色（浅色主题）---- */
+  --bg: #f6f8fb;
   --panel: #ffffff;
-  --panel-2: #f4f6fb;
-  --border: #e3e8ef;
-  --text: #1f2933;
-  --muted: #6b7280;
+  --panel-2: #f1f5f9;
+  --panel-3: #e8eef6;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-2: #475569;
+  /* 辅助文本色：需在 --bg / --panel / --panel-2 三种底色上都满足 WCAG AA 4.5:1。
+     #667085 是同时通过三者的最浅值（4.54 / 4.97 / 4.68），再浅即跌破 AA。 */
+  --muted: #667085;
+
+  /* ---- 品牌色 ---- */
   --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-text: #1d4ed8;
+  --primary-bg: #eff6ff;
+  --primary-border: #bfdbfe;
+  --focus-ring: rgba(37, 99, 235, 0.22);
+
+  /* ---- 语义色：在线 / 成功 ---- */
   --ok: #16a34a;
   --ok-text: #15803d;
-  --ok-bg: #dcfce7;
+  --ok-bg: #f0fdf4;
+  --ok-border: #bbf7d0;
+
+  /* ---- 语义色：警告 / 进行中 ---- */
+  --warn: #d97706;
+  --warn-text: #b45309;
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+
+  /* ---- 语义色：错误 / 未读 ---- */
   --err: #dc2626;
   --err-text: #b91c1c;
-  --err-bg: #fee2e2;
-  --accent: #e5484d;
-  --accent-text: #d13a43;
-  --unread: #1d4ed8;
-  --unread-bg: rgba(37, 99, 235, 0.12);
-  --pending: #d97706;
-  --pending-text: #b45309;
-  --pending-bg: #fef3c7;
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --err-bg: #fef2f2;
+  --err-border: #fecaca;
+
+  /* ---- 语义色：中性等待 ---- */
+  --idle: #667085;
+  --idle-text: #475569;
+  --idle-bg: #f1f5f9;
+  --idle-border: #e2e8f0;
+
+  /* ---- 未读强调 ---- */
+  --unread: #2563eb;
+  --unread-bg: #eff6ff;
+
+  /* ---- 阴影 ---- */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.18);
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-pill: 999px;
+  --shadow-lg: 0 16px 48px rgba(15, 23, 42, 0.18);
+
+  /* ---- 动效 ---- */
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-slow: 200ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---- 尺寸常量 ---- */
+  --header-h: 64px;
+  --sidebar-w: 240px;
+  --control-h: 36px;
+  --control-h-sm: 28px;
+
+  /* ---- 字族 ---- */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* 跳至主内容链接（WCAG 2.4.1 Bypass Blocks） */
-.skip-link {
-  position: absolute;
-  top: -100%;
-  left: 16px;
-  z-index: 100;
-  padding: 8px 16px;
-  background: var(--primary);
-  color: #fff;
-  border-radius: var(--radius-md);
-  text-decoration: none;
-  font-size: 14px;
-  font-weight: 600;
-}
-.skip-link:focus {
-  top: 16px;
-}
-
-* {
+/* ==========================================================================
+   2 重置与基础元素
+   ========================================================================== */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
   background: var(--bg);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-.app {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 20px;
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+/* 面板/区块标题统一走 --fs-h2，作为跨页面一致的层级锚点 */
+h2 {
+  font-size: var(--fs-h2);
+  line-height: var(--lh-h2);
 }
 
-.app-header h1 {
-  font-size: 22px;
+h3 {
+  font-size: var(--fs-h3);
+  line-height: var(--lh-h3);
+}
+
+p {
   margin: 0;
 }
 
-.badge {
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 13px;
+/* 焦点可见性：全局统一 2px 焦点环 + 2px offset。
+   暗色主题下换成浅蓝，保证在深底上仍有 ≥3:1 对比度。 */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* 跳至主内容（WCAG 2.4.1 Bypass Blocks） */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--sp-4);
+  z-index: 100;
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--primary);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-size: var(--fs-sm);
   font-weight: 600;
+  transition: top var(--dur-base) var(--ease);
+}
+.skip-link:focus {
+  top: var(--sp-4);
+}
+
+/* ==========================================================================
+   3 通用组件（按钮 / 输入 / 徽标 / 面板）
+   ========================================================================== */
+
+/* ---- 3.1 按钮：5 变体 × 3 尺寸 ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  height: var(--control-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-base) var(--ease),
+    border-color var(--dur-base) var(--ease),
+    color var(--dur-base) var(--ease);
+}
+
+.btn--sm {
+  height: var(--control-h-sm);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-xs);
+}
+
+.btn--lg {
+  height: 44px;
+  padding: 0 var(--sp-5);
+  font-size: var(--fs-body);
+}
+
+/* 主操作：每屏最多 1 个 */
+.btn--primary {
+  background: var(--primary);
+  color: #fff;
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+/* 次操作 */
+.btn--secondary {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn--secondary:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+/* 幽灵：图标按钮、低频操作 */
+.btn--ghost {
+  background: transparent;
+  color: var(--text-2);
+  border-color: transparent;
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* 危险：默认弱化，仅悬浮/聚焦时实色，降低误触 */
+.btn--danger {
+  background: var(--panel);
+  color: var(--err-text);
+  border-color: var(--border);
+}
+.btn--danger:hover:not(:disabled) {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+
+/* 强调轮廓：入口类操作 */
+.btn--outline {
+  background: transparent;
+  color: var(--primary-text);
+  border-color: var(--primary-border);
+}
+.btn--outline:hover:not(:disabled) {
+  background: var(--primary-bg);
+  border-color: var(--primary);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 图标按钮：正方形 + 触摸目标下限 */
+.icon-btn {
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  flex: none;
+}
+
+/* ---- 3.2 输入 ---- */
+.input,
+input[type='text'],
+input[type='password'],
+input:not([type]),
+select,
+textarea {
+  height: var(--control-h);
+  padding: 0 var(--sp-3);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color var(--dur-base) var(--ease),
+    box-shadow var(--dur-base) var(--ease);
+}
+
+textarea {
+  height: auto;
+  padding: var(--sp-2) var(--sp-3);
+  line-height: var(--lh-body);
+  resize: vertical;
+}
+
+.input::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+
+/* 焦点：边框染色 + 柔和光环（不做 outline 位移，避免布局抖动） */
+.input:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.input:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* ---- 3.3 徽标 / 状态点 / 计数 ---- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  /* 22px 视觉高度已足够；用 padding 撑到 24px 触摸目标下限（WCAG 2.5.8），
+     避免为达标而破坏顶栏紧凑度。 */
+  height: 24px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .badge.ok {
   background: var(--ok-bg);
   color: var(--ok-text);
 }
-
 .badge.err {
   background: var(--err-bg);
   color: var(--err-text);
 }
-
 .badge.pending {
-  background: var(--pending-bg);
-  color: var(--pending-text);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.badge.idle {
+  background: var(--idle-bg);
+  color: var(--idle-text);
 }
 
-.toolbar {
-  display: flex;
-  gap: 12px;
+/* 状态点：6px 圆 + 30% 光晕，与文字组合使用。
+   注：光晕用 rgba 硬编码而非 color-mix——后者在旧版 Safari/Firefox 下不支持，
+   会导致整条声明失效删除光晕（状态点退化为无色小点）。 */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+.badge.ok .status-dot {
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+}
+.badge.err .status-dot {
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+}
+.badge.pending .status-dot {
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18);
+}
+.badge.idle .status-dot {
+  box-shadow: 0 0 0 3px rgba(123, 135, 152, 0.18);
+}
+[data-theme='dark'] .status-dot {
+  box-shadow: 0 0 0 3px rgba(91, 156, 248, 0.24);
+}
+
+/* 未读计数：实色 + 白字 */
+.count-badge {
+  display: inline-flex;
   align-items: center;
-  margin: 16px 0;
-  flex-wrap: wrap;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--err);
+  color: #fff;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
-.toolbar label {
+/* ---- 3.4 面板 ---- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 面板头部：标题 + 可选操作，统一内边距与分隔 */
+.panel-head {
   display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 14px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
 
-/* 账户切换 chips：把原来"死 input"变成可点击切换的活动标签 */
-.account-switch {
+/* 面板副标题 / 计数：弱化的小字，与标题同基线对齐 */
+.panel-sub {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 分组小标题：小字距大写风格，与面板标题形成层级差 */
+.group-title {
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: var(--sp-3);
+}
+
+/* 空状态：图标 + 主文案 + 补充说明，统一居中留白 */
+.empty {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  padding: var(--sp-6) 0;
+  text-align: center;
+}
+
+.empty-state {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
   align-items: center;
-  flex-wrap: wrap;
+  gap: var(--sp-1);
+  padding: var(--sp-8) var(--sp-4);
+  color: var(--muted);
+  text-align: center;
+}
+.empty-state .icon {
+  color: var(--border-strong);
+  margin-bottom: var(--sp-1);
+}
+.empty-state p {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.empty-state span {
+  font-size: var(--fs-xs);
+  max-width: 36ch;
+  line-height: var(--lh-sm);
 }
 
-.account-switch-label {
-  font-size: 14px;
+/* 表单字段：标签 + 控件纵向成组，替代原来的裸 placeholder 输入 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.field label,
+.field-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.field input,
+.field select {
+  width: 100%;
+  min-width: 0;
+}
+.field-label {
+  display: block;
+  margin-bottom: var(--sp-1);
+}
+
+/* 内联提示条（错误/警告共用骨架，语义色区分） */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  border-left: 3px solid currentColor;
+}
+.alert.error {
+  background: var(--err-bg);
+  color: var(--err-text);
+}
+.alert.warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+/* ==========================================================================
+   4 布局骨架
+   ========================================================================== */
+.app {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--sp-5);
+}
+
+/* ---- 4.1 顶栏 ---- */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  min-height: var(--header-h);
+  padding: var(--sp-3) var(--sp-5);
+  margin: calc(var(--sp-5) * -1) calc(var(--sp-5) * -1) var(--sp-5);
+  /* 先给不透明底色作为兜底（color-mix/backdrop-filter 不被支持时仍可读） */
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+}
+/* 支持 color-mix 时升级为半透明 + 模糊玻璃效果 */
+@supports (background: color-mix(in srgb, red 50%, transparent)) {
+  .app-header {
+    background: color-mix(in srgb, var(--panel) 88%, transparent);
+    backdrop-filter: blur(12px);
+  }
+}
+
+/* logo 即回首页入口 */
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1);
+  margin-left: calc(var(--sp-1) * -1);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--text);
+  transition: opacity var(--dur-base) var(--ease);
+}
+.logo:hover {
+  opacity: 0.82;
+}
+.logo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.logo-text {
+  font-size: var(--fs-h1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* 状态组：把散落徽标聚合为一个整体，统一节奏，减少视觉噪声 */
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.header-status .status-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+}
+
+/* ---- 4.2 两栏主体 ---- */
+.app-body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-5);
+}
+
+/* ---- 4.3 侧栏 ---- */
+.sidebar {
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
+  position: sticky;
+  top: calc(var(--header-h) + var(--sp-3));
+  padding: var(--sp-4);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  max-height: calc(100vh - var(--header-h) - var(--sp-6));
+  overflow-y: auto;
+}
+
+.sidebar-title {
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: var(--sp-3);
+}
+
+.account-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+/* 侧栏空状态：无账户时给出明确的下一步指引，而不是留白 */
+.sidebar-empty {
+  padding: var(--sp-3);
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-sm);
   color: var(--muted);
 }
 
+/* 账户项：左图标 + ID + 状态/未读尾随 */
 .account-chip {
-  background: var(--panel);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--border);
-  padding: 6px 12px;
-  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: left;
   cursor: pointer;
-  font-size: 13px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
-
 .account-chip:hover {
-  border-color: var(--primary);
+  background: var(--panel-2);
 }
-
+.account-chip .icon {
+  color: var(--muted);
+  flex: none;
+}
 .account-chip.active {
-  background: var(--primary);
-  color: #fff;
-  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary-text);
+  font-weight: 600;
+}
+.account-chip.active .icon {
+  color: var(--primary);
 }
 
-/* 账户 chips 上的未读徽标 */
+.chip-id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: -0.01em;
+}
+
+/* 账户状态标签（暂停 / 异常） */
+.chip-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  flex: none;
+}
+.account-chip.status-paused .chip-status {
+  background: var(--idle-bg);
+  color: var(--idle-text);
+}
+.account-chip.status-error .chip-status {
+  background: var(--err-bg);
+  color: var(--err-text);
+}
+
+/* 未读计数（复用 count-badge 视觉，尺寸略小以适配侧栏） */
 .chip-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 18px;
   height: 18px;
-  margin-left: 6px;
   padding: 0 5px;
+  flex: none;
   border-radius: var(--radius-pill);
-  background: var(--accent);
+  background: var(--err);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-weight: 700;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
-/* 连接/账户服务：状态徽标（paused 灰 / error 红） */
-.chip-status {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 1px 7px;
-  border-radius: var(--radius-pill);
-  font-size: 11px;
+/* 侧栏当前账户操作区 */
+.sidebar-actions {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-actions-title {
+  font-size: var(--fs-xs);
   font-weight: 600;
-}
-.account-chip.status-paused .chip-status {
-  background: #6b7280;
-  color: #fff;
-}
-.account-chip.status-error .chip-status {
-  background: var(--accent);
-  color: #fff;
+  color: var(--text-2);
+  margin-bottom: var(--sp-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* 当前账户操作按钮组（暂停/恢复 + 删除） */
 .account-actions {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  border-left: 1px solid var(--border);
-  padding-left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
 }
+/* 侧栏内按钮：左对齐、全宽、次级样式，降低视觉重量 */
 .account-actions button {
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  cursor: pointer;
+  justify-content: flex-start;
+  width: 100%;
+  background: transparent;
+  color: var(--text-2);
+  border-color: transparent;
+  font-weight: 500;
 }
 .account-actions button:hover:not(:disabled) {
-  border-color: var(--primary);
-}
-.account-actions button.danger-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.account-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  background: var(--panel-2);
+  color: var(--text);
 }
 
-/* 真实邮箱同步：立即同步按钮（强调色）+ 凭据录入表单 + 失败提示 */
+/* 「立即同步」是侧栏内的主操作，给予品牌色描边强调 */
 .account-actions button.sync-btn {
-  border-color: var(--primary);
-  color: var(--primary);
+  color: var(--primary-text);
+  border-color: var(--primary-border);
+  background: var(--primary-bg);
   font-weight: 600;
 }
-.cred-form {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  margin-left: 12px;
-  padding: 4px 10px;
-  border-left: 1px solid var(--border);
-}
-.cred-form input {
-  padding: 5px 9px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg, #fff);
-  font-size: 12px;
-  min-width: 150px;
-}
-.cred-form input[type='password'] {
-  min-width: 140px;
-}
-.cred-form button {
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
+.account-actions button.sync-btn:hover:not(:disabled) {
   background: var(--primary);
+  border-color: var(--primary);
   color: #fff;
-  border: none;
-  cursor: pointer;
 }
+
+/* 「删除账户」保持弱化，仅悬浮时红 */
+.account-actions button.danger-btn:hover:not(:disabled) {
+  background: var(--err-bg);
+  color: var(--err-text);
+}
+
+/* 凭据表单：纵向堆叠，作为侧栏内的次级容器 */
+.cred-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--border);
+}
+.cred-form input,
+.cred-form button {
+  width: 100%;
+  min-width: 0;
+}
+
 .sync-error {
-  margin-left: 10px;
-  font-size: 12px;
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--warn-text);
 }
 
-/* 添加账户入口按钮 */
-.add-account-btn {
-  font-size: 12px;
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: 1px dashed var(--primary);
-  color: var(--primary);
-  cursor: pointer;
+/* ---- 4.4 主列 ---- */
+.main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
 }
 
-/* 添加账户内联表单 */
+/* ---- 4.5 工具栏 ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+/* 检索框占据主区右侧的弹性空间，视觉上"撑开"工具栏 */
+.toolbar .search-bar {
+  flex: 1;
+  min-width: 220px;
+  margin-left: auto;
+}
+
+/* ---- 4.6 添加账户表单 ---- */
 .account-form {
   display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin: 8px 0 16px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
   background: var(--panel);
-}
-.account-form input,
-.account-form select {
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--bg, #fff);
-  font-size: 13px;
-  min-width: 160px;
-}
-.account-form input:first-child {
-  min-width: 140px;
-}
-.account-form button {
-  padding: 6px 16px;
-  border-radius: var(--radius-sm);
-  background: var(--primary);
-  color: #fff;
-  border: none;
-  cursor: pointer;
-  font-size: 13px;
-}
-.account-form button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
 
-/* 邮件项未读态：加粗主题 + 左侧红点 */
-.mail-item.unread .mail-subject {
-  font-weight: 700;
+.account-form-head h2 {
+  font-size: var(--fs-h1);
+  margin-bottom: var(--sp-1);
 }
-.mail-item.unread {
-  background: var(--panel-2);
-}
-.unread-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  vertical-align: middle;
-}
-
-/* 详情内：已读/未读状态与操作按钮 */
-.read-state {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-}
-.read-state.unread {
-  color: var(--unread);
-  background: var(--unread-bg);
-}
-.read-state.read {
+.account-form-hint {
+  font-size: var(--fs-xs);
   color: var(--muted);
-  background: rgba(107, 114, 128, 0.10);
+  line-height: var(--lh-sm);
 }
-.detail-actions {
+
+/* 字段区：自适应换行网格，宽屏一行 3–4 个字段 */
+.account-form-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+}
+
+/* 操作条：右对齐，主操作在最后 */
+.account-form-actions {
   display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
-.detail-btn {
-  padding: 8px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 13px;
-}
-.detail-btn:hover {
-  border-color: var(--primary);
-}
-.detail-btn.danger {
-  color: #fff;
-  background: var(--accent);
-  border-color: var(--accent);
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
 }
 
-input,
-textarea {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 8px 10px;
-  font-size: 14px;
-  font-family: inherit;
-}
-
-input:focus,
-textarea:focus {
-  outline: 2px solid var(--primary);
-  outline-offset: -1px;
-}
-
-button {
-  border: none;
-  background: var(--primary);
-  color: #fff;
-  padding: 8px 14px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 14px;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* 键盘焦点可达性 */
-button:focus-visible,
-.account-chip:focus-visible,
-[role='button']:focus-visible,
-.detail-btn:focus-visible,
-.add-account-btn:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-.search-clear:focus-visible {
-  outline: 2px solid var(--muted);
-  outline-offset: 2px;
-}
-
-/* 触摸目标最小尺寸（WCAG 2.5.8: 44×44 CSS px） */
-.account-chip,
-.chip-badge,
-.search-clear,
-.modal-close,
-.detail-btn,
-.badge,
-.ws-badge {
-  min-height: 44px;
-}
-.chip-badge {
-  min-width: 44px;
-  justify-content: center;
-}
-
-.search-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* 内联 SVG 图标基础样式：currentColor 描边，垂直对齐文字中线 */
-.icon {
-  display: inline-block;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
-.search-icon {
-  display: inline-flex;
-  align-items: center;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-
-.attach-icon-inline {
-  vertical-align: -1px;
-}
-
-.notif-kind {
-  font-weight: 600;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.notif-kind .icon {
-  color: var(--primary);
-}
-
-.attach-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.search-clear {
-  background: transparent;
-  color: var(--muted);
-  font-size: 18px;
-  line-height: 1;
-  padding: 0 10px;
-  border-radius: var(--radius-md);
-}
-
-.search-clear:hover {
-  background: #f1f5f9;
-  color: var(--text);
-}
-
+/* ---- 4.7 双栏内容区 ---- */
 .content {
   display: grid;
-  grid-template-columns: 1fr 360px;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: var(--sp-5);
   align-items: start;
 }
-
 .content > * {
   min-width: 0;
 }
 
-@media (max-width: 860px) {
-  .app {
-    padding: 12px;
-  }
-  .app-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .search-bar {
-    width: 100%;
-  }
-  .search-bar input {
-    flex: 1;
-    min-width: 0;
-  }
-  .content {
-    grid-template-columns: 1fr;
-  }
-  .ai-pane {
-    order: 1;
-  }
-  .mail-pane {
-    order: 0;
-  }
-}
-
-/* 平板竖屏（768px）：优化间距 */
-@media (max-width: 768px) and (min-width: 481px) {
-  .app {
-    padding: 16px;
-  }
-  .mail-detail-subject {
-    font-size: 16px;
-  }
-  .modal {
-    max-width: 90%;
-    padding: 16px;
-  }
-}
-
-/* 小屏手机（≤480px）：紧凑布局 */
-@media (max-width: 480px) {
-  .app {
-    padding: 8px;
-  }
-  .app-header h1 {
-    font-size: 18px;
-  }
-  .header-status {
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .account-switch {
-    width: 100%;
-  }
-  .account-actions {
-    border-left: none;
-    border-top: 1px solid var(--border);
-    padding-left: 0;
-    padding-top: 8px;
-    width: 100%;
-  }
-  .cred-form {
-    border-left: none;
-    border-top: 1px solid var(--border);
-    margin-left: 0;
-    padding-top: 8px;
-    width: 100%;
-  }
-  .mail-detail-subject {
-    font-size: 16px;
-    margin-right: 32px;
-  }
-  .detail-actions {
-    flex-direction: column;
-  }
-  .detail-btn {
-    text-align: center;
-  }
-}
-
-.mail-pane,
-.ai-pane {
+.mail-pane {
+  padding: var(--sp-4);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 16px;
+  box-shadow: var(--shadow-sm);
 }
 
+.ai-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  position: sticky;
+  top: calc(var(--header-h) + var(--sp-3));
+}
+
+/* ==========================================================================
+   5 业务模块
+   ========================================================================== */
+
+/* ---- 5.1 检索栏 ---- */
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding-left: var(--sp-3);
+  transition:
+    border-color var(--dur-base) var(--ease),
+    box-shadow var(--dur-base) var(--ease);
+}
+.search-bar:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.search-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  flex: none;
+}
+/* 输入框与容器融为一体（容器负责边框与焦点环） */
+.search-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 var(--sp-2);
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+.search-bar input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+.search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.search-clear:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+/* 检索提交按钮：与输入框拼接，圆角做同心处理 */
+.search-bar > button:last-child {
+  height: 34px;
+  padding: 0 var(--sp-4);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.search-bar > button:last-child:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+/* ---- 5.2 邮件列表 ---- */
 .mail-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-/* 虚拟滚动容器：超过阈值项时启用，限制视口高度触发滚动 */
+/* 虚拟滚动容器：高度按视口推算，保证与 header/toolbar 不重叠 */
 .mail-list.virtual {
-  max-height: calc(100vh - 220px);
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  scroll-behavior: auto;
+  scrollbar-width: thin;
 }
 
 .mail-item {
-  padding: 12px;
+  position: relative;
+  height: 76px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--border);
-  /* 固定行高：虚拟滚动依赖恒定 ROW_HEIGHT（含 padding+border） */
-  height: 80px;
   overflow: hidden;
+  transition: background-color var(--dur-fast) var(--ease);
 }
-
 .mail-item:last-child {
   border-bottom: none;
 }
 
+/* 未读：左侧竖条（非整块底色翻转）+ 标题加粗 + 圆点，三重冗余
+   —— 满足 WCAG 1.4.1「不只靠颜色传达信息」 */
+.mail-item::before {
+  content: '';
+  position: absolute;
+  inset: var(--sp-2) auto var(--sp-2) 0;
+  width: 3px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.mail-item.unread::before {
+  background: var(--primary);
+}
+.mail-item.clickable {
+  cursor: pointer;
+}
+.mail-item.clickable:hover {
+  background: var(--panel-2);
+}
+.mail-item.unread {
+  background: var(--unread-bg);
+}
+.mail-item.unread.clickable:hover {
+  background: var(--panel-3);
+}
+
+/* 列表行内部三段式：主题 / 元信息 / 摘要 */
+.mail-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
 .mail-subject {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-body);
   font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-item.unread .mail-subject {
+  font-weight: 700;
+  color: var(--text);
 }
 
 .mail-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: 2px;
   color: var(--muted);
-  font-size: 13px;
-  margin: 4px 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-from {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46%;
+  color: var(--text-2);
+}
+.mail-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .mail-preview {
+  margin-top: 2px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.empty {
+.unread-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.attach-icon-inline {
+  vertical-align: -1px;
   color: var(--muted);
 }
 
-.error {
-  background: var(--err-bg);
-  color: var(--err-text);
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  margin: 12px 0;
-  font-size: 14px;
-}
-
-.ai-messages {
-  min-height: 160px;
-  max-height: 320px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.ai-msg {
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
-  font-size: 14px;
-}
-
-.ai-msg.user {
-  background: #eff6ff;
-  align-self: flex-end;
-  max-width: 85%;
-}
-
-.ai-msg.model {
-  background: #f1f5f9;
-  align-self: flex-start;
-  max-width: 85%;
-}
-
-.ai-input {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ai-input textarea {
-  resize: vertical;
-  min-height: 60px;
-}
-
-h2 {
-  font-size: 16px;
-  margin-top: 0;
-}
-
-.header-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.ws-badge {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-}
-
-.ws-badge.on {
-  background: var(--ok-bg);
-  color: var(--ok-text);
-}
-
-.ws-badge.off {
-  background: #f1f5f9;
-  color: var(--muted);
-}
-
-.ws-badge.reconnecting {
-  background: var(--pending-bg);
-  color: var(--pending-text);
-}
-
-.unread-badge {
-  background: var(--err);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  min-width: 20px;
-  height: 20px;
-  border-radius: var(--radius-pill);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-}
-
-.simulate-btn {
-  background: var(--pending);
-}
-
-.toast-zone {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  z-index: 40;
-  max-width: 400px;
-  width: calc(100% - 40px);
-}
-
-.toast {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--primary);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  font-size: 14px;
-  box-shadow: var(--shadow-sm);
-  animation: toast-in 0.2s ease-out;
-}
-
-.toast-new-mail {
-  border-left-color: var(--ok);
-}
-
-.toast-error {
-  border-left-color: var(--err);
-}
-
-.toast-sync-state {
-  border-left-color: var(--pending);
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.mail-item.clickable {
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.mail-item.clickable:hover {
-  background: #f8fafc;
-}
-
-.mail-item.clickable:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: -2px;
-}
-
-/* 邮件详情模态 */
+/* ---- 5.3 邮件详情模态 ---- */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  z-index: 50;
-  animation: toast-in 0.15s ease-out;
+  padding: var(--sp-5);
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(2px);
+  animation: fade-in var(--dur-base) var(--ease);
 }
 
 .modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 720px;
+  max-height: 84vh;
+  padding: 0;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 20px 22px;
-  max-width: 560px;
-  width: 100%;
-  max-height: 80vh;
-  overflow-y: auto;
-  position: relative;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: rise-in var(--dur-slow) var(--ease);
+}
+
+/* 固定头部 */
+.modal-head {
+  flex: none;
+  padding: var(--sp-5) var(--sp-6) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+/* 可滚动正文 */
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-6);
+}
+/* 固定底部操作条 */
+.modal-foot {
+  flex: none;
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-6);
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
 }
 
 .modal-close {
   position: absolute;
-  top: 10px;
-  right: 12px;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 22px;
-  line-height: 1;
-  padding: 2px 8px;
+  border: none;
   border-radius: var(--radius-sm);
+  cursor: pointer;
 }
-
 .modal-close:hover {
-  background: #f1f5f9;
+  background: var(--panel-2);
   color: var(--text);
 }
 
 .mail-detail-subject {
-  font-size: 18px;
-  margin: 0 28px 12px 0;
+  font-size: var(--fs-display);
+  line-height: var(--lh-display);
+  font-weight: 700;
+  margin: 0 var(--sp-8) var(--sp-3) 0;
+  word-break: break-word;
 }
 
+/* 元信息：改为标签 + 值的网格，比纯堆叠更易扫读 */
 .mail-detail-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.mail-detail-meta dt {
   color: var(--muted);
-  font-size: 13px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
+  font-weight: 500;
+}
+.mail-detail-meta dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .mail-detail-body {
+  margin: 0;
   font-family: inherit;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
   white-space: pre-wrap;
   word-break: break-word;
-  margin: 0;
+  color: var(--text);
 }
 
-/* 实时通知常驻面板 */
+/* 已读/未读状态标签 */
+.read-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.read-state.unread {
+  color: var(--primary-text);
+  background: var(--primary-bg);
+}
+.read-state.read {
+  color: var(--idle-text);
+  background: var(--idle-bg);
+}
+
+/* 附件区：平底容器，避免"盒中盒" */
+.attachments {
+  grid-column: 1 / -1;
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--panel-2);
+  border-radius: var(--radius-md);
+}
+.attach-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: var(--sp-2);
+}
+.attach-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.attach-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.attach-name {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-meta {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- 5.4 实时通知面板 ---- */
 .notif-feed {
+  padding: var(--sp-4);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.notif-feed h3 {
-  font-size: 15px;
-  margin: 0 0 10px;
+  box-shadow: var(--shadow-sm);
 }
 
 .notif-list {
@@ -875,203 +1308,531 @@ h2 {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 220px;
+  gap: var(--sp-1);
+  max-height: 240px;
   overflow-y: auto;
+  scrollbar-width: thin;
+}
+.notif-list .empty {
+  padding: var(--sp-4) 0;
 }
 
 .notif-item {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--sp-2);
   align-items: center;
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
-  background: #f8fafc;
+  background: var(--panel-2);
   border-left: 3px solid var(--primary);
-  font-size: 13px;
+  font-size: var(--fs-xs);
 }
-
+/* 语义色条：5 类事件各一色，与 toast 保持同一映射 */
 .notif-new-mail {
   border-left-color: var(--ok);
 }
-
 .notif-sync-state {
-  border-left-color: var(--pending);
+  border-left-color: var(--warn);
 }
-
 .notif-error {
   border-left-color: var(--err);
 }
+.notif-mail-updated,
+.notif-mail-deleted {
+  border-left-color: var(--idle);
+}
+
+.notif-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.notif-kind .icon {
+  color: var(--muted);
+}
+.notif-new-mail .notif-kind .icon {
+  color: var(--ok);
+}
+.notif-error .notif-kind .icon {
+  color: var(--err);
+}
+.notif-sync-state .notif-kind .icon {
+  color: var(--warn);
+}
 
 .notif-text {
-  color: var(--text);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text);
 }
 
 .notif-time {
+  flex: none;
   color: var(--muted);
-  font-size: 12px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* 清除检索按钮 */
-.clear-search-btn {
-  background: var(--panel);
-  color: var(--primary);
-  border: 1px solid var(--primary);
-}
-
-.clear-search-btn:hover {
-  background: #eff6ff;
-}
-
-/* 邮件详情附件清单 */
-.attachments {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-.attach-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ---- 5.5 AI 助手 ---- */
+.ai-chat {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.attach-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 8px;
+  padding: var(--sp-4);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
-.attach-name {
-  font-size: 13px;
-  font-weight: 500;
+.ai-messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 140px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: var(--sp-3);
+  scrollbar-width: thin;
+}
+.ai-messages .empty {
+  padding: var(--sp-5) var(--sp-3);
+}
+
+/* 对话气泡：用户右对齐实色浅底，AI 左对齐中性浅底 */
+.ai-msg {
+  max-width: 86%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ai-msg.user {
+  align-self: flex-end;
+  background: var(--primary-bg);
+  color: var(--text);
+  border-bottom-right-radius: var(--radius-xs);
+}
+.ai-msg.model {
+  align-self: flex-start;
+  background: var(--panel-2);
+  color: var(--text);
+  border-bottom-left-radius: var(--radius-xs);
+}
+.ai-msg b {
+  color: var(--muted);
+  font-weight: 600;
+  margin-right: var(--sp-1);
+}
+
+.ai-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.ai-input textarea {
+  min-height: 64px;
+  max-height: 160px;
+}
+.ai-input button {
+  align-self: flex-end;
+}
+
+/* ==========================================================================
+   6 反馈层（Toast）
+   ========================================================================== */
+.toast-zone {
+  position: fixed;
+  right: var(--sp-6);
+  bottom: var(--sp-6);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: min(380px, calc(100vw - var(--sp-8)));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-sm);
+  animation: sheet-in var(--dur-slow) var(--ease);
+}
+.toast strong {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  font-weight: 600;
+}
+.toast span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-2);
+}
+.toast-new-mail {
+  border-left-color: var(--ok);
+}
+.toast-new-mail strong {
+  color: var(--ok-text);
+}
+.toast-sync-state {
+  border-left-color: var(--warn);
+}
+.toast-sync-state strong {
+  color: var(--warn-text);
+}
+.toast-error {
+  border-left-color: var(--err);
+}
+.toast-error strong {
+  color: var(--err-text);
+}
+.toast-mail-updated,
+.toast-mail-deleted {
+  border-left-color: var(--idle);
 }
 
-.attach-meta {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-/* 全局错误边界兜底 UI */
+/* ==========================================================================
+   7 错误边界兜底
+   ========================================================================== */
 .error-boundary {
-  max-width: 600px;
-  margin: 80px auto;
-  padding: 28px 32px;
+  max-width: 560px;
+  margin: var(--sp-10) auto;
+  padding: var(--sp-8);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-left: 4px solid var(--err);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   text-align: center;
 }
-
 .error-boundary h2 {
-  margin-top: 0;
-  color: var(--err);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-h1);
+  color: var(--err-text);
+  margin-bottom: var(--sp-3);
 }
-
 .error-boundary-msg {
+  margin-bottom: var(--sp-5);
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   word-break: break-word;
 }
 
-/* ---- 暗色模式（[data-theme="dark"] 令牌覆盖 + 硬编码色修正） ---- */
-[data-theme="dark"] {
-  --bg: #0f172a;
-  --panel: #1e293b;
-  --panel-2: #334155;
-  --border: #475569;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --primary: #60a5fa;
-  --ok: #4ade80;
-  --ok-text: #86efac;
-  --ok-bg: #052e16;
+/* ==========================================================================
+   8 动效关键帧
+   ========================================================================== */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   9 暗色主题（仅覆盖 Token，不新增组件选择器）
+   ========================================================================== */
+[data-theme='dark'] {
+  /* 中性色：靠亮度差分层，弱化边框依赖 */
+  --bg: #0b1220;
+  --panel: #151e2e;
+  --panel-2: #1d2739;
+  --panel-3: #263149;
+  --border: #2a3648;
+  --border-strong: #3d4a61;
+  --text: #e6edf6;
+  --text-2: #b6c2d4;
+  --muted: #9aa8bd;
+
+  /* 品牌色提亮，保证深底上对比度 */
+  --primary: #5b9cf8;
+  --primary-hover: #7cb0fa;
+  --primary-text: #8fbcfa;
+  --primary-bg: rgba(91, 156, 248, 0.14);
+  --primary-border: rgba(91, 156, 248, 0.4);
+  --focus-ring: rgba(91, 156, 248, 0.32);
+
+  --ok: #34d399;
+  --ok-text: #6ee7b7;
+  --ok-bg: rgba(52, 211, 153, 0.14);
+  --ok-border: rgba(52, 211, 153, 0.36);
+
+  --warn: #fbbf24;
+  --warn-text: #fcd34d;
+  --warn-bg: rgba(251, 191, 36, 0.14);
+  --warn-border: rgba(251, 191, 36, 0.36);
+
   --err: #f87171;
   --err-text: #fca5a5;
-  --err-bg: #450a0a;
-  --accent: #fb7185;
-  --accent-text: #fda4af;
-  --unread: #60a5fa;
-  --unread-bg: rgba(96, 165, 250, 0.15);
-  --pending: #fbbf24;
-  --pending-text: #fcd34d;
-  --pending-bg: #451a03;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --err-bg: rgba(248, 113, 113, 0.14);
+  --err-border: rgba(248, 113, 113, 0.36);
+
+  --idle: #9aa8bd;
+  --idle-text: #c3cede;
+  --idle-bg: rgba(154, 168, 189, 0.14);
+  --idle-border: rgba(154, 168, 189, 0.3);
+
+  --unread: #5b9cf8;
+  --unread-bg: rgba(91, 156, 248, 0.1);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.62);
 }
 
-/* 暗色下硬编码背景色修正（这些选择器未走令牌，需单独覆盖） */
-[data-theme="dark"] .ws-badge.off {
-  background: var(--panel-2);
-}
-[data-theme="dark"] .ai-msg.user {
-  background: rgba(96, 165, 250, 0.12);
-}
-[data-theme="dark"] .ai-msg.model {
-  background: var(--panel-2);
-}
-[data-theme="dark"] .modal-close:hover {
-  background: var(--panel-2);
-}
-[data-theme="dark"] .notif-item {
-  background: var(--panel-2);
-}
-[data-theme="dark"] .clear-search-btn:hover {
-  background: rgba(96, 165, 250, 0.12);
-}
-[data-theme="dark"] .attachments {
-  background: var(--panel-2);
-}
-[data-theme="dark"] .read-state.read {
-  background: rgba(148, 163, 184, 0.12);
-}
-[data-theme="dark"] .modal-overlay {
-  background: rgba(0, 0, 0, 0.65);
+/* 暗色下模态遮罩加深，避免浅色面板被背景干扰 */
+[data-theme='dark'] .modal-overlay {
+  background: rgba(0, 0, 0, 0.66);
 }
 
-/* 主题切换按钮 */
-.theme-toggle {
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 6px;
-  transition: background 0.15s ease, color 0.15s ease;
+/* 暗色下顶栏改用深色不透明兜底（@supports 内再叠加玻璃效果） */
+[data-theme='dark'] .app-header {
+  background: var(--panel);
 }
-.theme-toggle:hover {
-  background: var(--panel-2);
-  color: var(--text);
+@supports (background: color-mix(in srgb, red 50%, transparent)) {
+  [data-theme='dark'] .app-header {
+    background: color-mix(in srgb, var(--panel) 86%, transparent);
+  }
 }
 
-/* ---- 减少动效偏好（WCAG 2.3.3） ---- */
+/* 主按钮在暗色下需深色文字保证对比度 */
+[data-theme='dark'] .btn--primary,
+[data-theme='dark'] .search-bar > button:last-child {
+  color: #08121f;
+}
+
+/* ==========================================================================
+   10 响应式
+   ========================================================================== */
+
+/* ---- 10.1 桌面窄屏：收窄右侧栏 ---- */
+@media (max-width: 1279px) {
+  .content {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+}
+
+/* ---- 10.2 平板竖屏：内容区转单列，右侧栏下移 ---- */
+@media (max-width: 1079px) {
+  .content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ai-pane {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--sp-5);
+  }
+}
+
+/* ---- 10.3 小屏平板：侧栏折叠为横向 chips ---- */
+@media (max-width: 899px) {
+  .app-body {
+    flex-direction: column;
+  }
+  .sidebar {
+    position: static;
+    flex: none;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+  }
+  .account-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  .account-chip {
+    width: auto;
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--panel-2);
+  }
+  .account-chip .chip-id {
+    max-width: 160px;
+  }
+  .chat-sidebar-actions,
+  .sidebar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+  .sidebar-actions-title {
+    margin-bottom: 0;
+  }
+  .account-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .account-actions button {
+    width: auto;
+  }
+  .cred-form {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    border-top: none;
+    margin-top: 0;
+    padding-top: 0;
+  }
+  .cred-form input {
+    flex: 1 1 160px;
+    width: auto;
+  }
+  .cred-form button {
+    width: auto;
+  }
+}
+
+/* ---- 10.4 手机：紧凑化 + 全屏模态 ---- */
+@media (max-width: 639px) {
+  .app {
+    padding: var(--sp-3);
+  }
+
+  .app-header {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    min-height: auto;
+    padding: var(--sp-3);
+    margin: calc(var(--sp-3) * -1) calc(var(--sp-3) * -1) var(--sp-3);
+  }
+  .logo-text {
+    font-size: var(--fs-body);
+  }
+  .header-status {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  /* 追加按钮在移动端占满一行，成为明确主操作 */
+  .header-status .add-account-btn {
+    order: -1;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .toolbar .search-bar {
+    min-width: 0;
+    margin-left: 0;
+    width: 100%;
+  }
+  .toolbar > button {
+    width: 100%;
+  }
+
+  .mail-pane {
+    padding: var(--sp-3);
+  }
+  .mail-item {
+    padding-left: var(--sp-4);
+  }
+  /* 移动端放宽行高，避免三段文本挤压 */
+  .mail-item {
+    height: 82px;
+  }
+
+  /* 模态全屏化，充分利用小屏 */
+  .modal-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+  .modal {
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+  }
+  .modal-head {
+    padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  }
+  .modal-body {
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .modal-foot {
+    padding: var(--sp-3) var(--sp-4);
+    flex-direction: column-reverse;
+  }
+  .modal-foot .btn {
+    width: 100%;
+  }
+  .mail-detail-subject {
+    font-size: var(--fs-h1);
+    margin-right: var(--sp-8);
+  }
+  .mail-detail-meta {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1);
+  }
+  .mail-detail-meta dt {
+    margin-top: var(--sp-1);
+  }
+
+  .toast-zone {
+    right: var(--sp-3);
+    left: var(--sp-3);
+    bottom: var(--sp-3);
+    width: auto;
+  }
+
+  .ai-pane {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ==========================================================================
+   11 无障碍与打印
+   ========================================================================== */
+
+/* 减少动效偏好（WCAG 2.3.3）：全局降级为瞬变 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1083,7 +1844,18 @@ h2 {
   }
 }
 
-/* ---- 打印样式 ---- */
+/* 高对比度偏好（WCAG 1.4.11）：加强边框以弥补背景色被系统覆盖 */
+@media (prefers-contrast: more) {
+  :root {
+    --border: #94a3b8;
+    --muted: #475569;
+  }
+  .mail-item {
+    border-bottom-color: var(--border-strong);
+  }
+}
+
+/* 打印：剥离交互装饰，只保留可读邮件内容 */
 @media print {
   body {
     background: #fff;
@@ -1093,17 +1865,15 @@ h2 {
     max-width: none;
     padding: 0;
   }
+  .app-header,
+  .sidebar,
   .toolbar,
   .ai-pane,
   .toast-zone,
-  .account-actions,
-  .cred-form,
-  .simulate-btn,
-  .search-bar,
-  .clear-search-btn,
-  .add-account-btn,
-  .sync-error,
-  .modal-overlay {
+  .account-form,
+  .modal-overlay,
+  .modal-foot,
+  .modal-close {
     display: none !important;
   }
   .content {
@@ -1111,11 +1881,12 @@ h2 {
   }
   .mail-pane {
     border: none;
-    padding: 0;
     box-shadow: none;
+    padding: 0;
   }
   .mail-item {
     break-inside: avoid;
     page-break-inside: avoid;
+    height: auto;
   }
 }

@@ -30,7 +30,16 @@ dist/
 # ---------- 密钥与本地配置（保留 .env.example） ----------
 .env
 **/.env
+# 带后缀的 env 文件同样属于密钥范畴 —— 原先只写 `.env` 精确匹配，
+# 导致 `.env.keycloak-prod`（含 KC_ADMIN_PASSWORD / KC_DB_PASSWORD / OIDC_CLIENT_SECRET）未被忽略。
+**/.env.*
 !**/.env.example
+# 例外：前端 .env.production 只含构建期开关 VITE_DEMO_MODE，不含任何凭据，且**必须入库**——
+# 它缺失会让 vite.config.ts 的 `VITE_DEMO_MODE !== 'false'` 退回 true，产出带演示模式的生产包。
+!email-aggregator-web/.env.production
+
+# ---------- Keycloak 联调临时凭据（含 access token，禁止入库） ----------
+**/kc-token.json
 
 # ---------- Agent / 工作区 / 临时 ----------
 .workbuddy/

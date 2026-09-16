@@ -1,0 +1,21 @@
+# =============================================================================
+# Phase 5 / P5-K1：Caddy 生产反代（自签证书）
+# 宿主 8443 → 容器 443（compose 映射 8443:443）→ keycloak-a:8080 / keycloak-b:8080
+# 注意 site 地址写法（两个坑）：
+#   1) 写 https://localhost:8443 → Caddy 容器内监听 8443 而非 443，宿主端口无监听
+#   2) 写 :443（无主机名）→ tls internal 无法生成匹配的 TLS 策略，握手失败
+# 正确写法：localhost（无端口）→ 容器内监听 80+443，tls internal 启动即为
+# localhost 签发自签证书并绑定策略。
+# 故障切换：副本 unhealthy/下线时 Caddy 自动摘除（passive health via 连接错误重试）
+# =============================================================================
+localhost {
+	tls internal
+
+	reverse_proxy keycloak-a:8080 keycloak-b:8080 {
+		lb_policy round_robin
+		lb_try_duration 20s
+		transport http {
+			read_timeout 30s
+		}
+	}
+}

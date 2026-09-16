@@ -13,6 +13,9 @@ export type IconName =
   | 'x'
   | 'check'
   | 'send'
+  | 'plus'
+  | 'play'
+  | 'pause'
 
 // 内联 SVG 图标（feather 风格，currentColor 描边），跨平台渲染一致，
 // 替代原先散落的 emoji（📬🔄📩🗑️⚠️📎），避免不同 OS 字体差异导致的图标错位。
@@ -76,6 +79,19 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <line x1="22" y1="2" x2="11" y2="13" />
       <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </>
+  ),
+  plus: (
+    <>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </>
+  ),
+  play: <polygon points="6 3 20 12 6 21 6 3" />,
+  pause: (
+    <>
+      <line x1="9" y1="4" x2="9" y2="20" />
+      <line x1="15" y1="4" x2="15" y2="20" />
     </>
   ),
 }

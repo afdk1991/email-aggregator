@@ -1,0 +1,35 @@
+# 邮箱聚合平台 · 线上完整功能版（单容器实例）
+# 形态：Go 主干内嵌 React SPA（-tags webui），单进程同端口提供 REST + WebSocket + 页面，
+#       内存态零外部中间件依赖，保留 30s 定时演示推送与 AI 网关（未配模型时降级本地演示）。
+#
+# 用法（在本目录 deploy/container 下）：
+#   docker compose up -d --build      # 构建镜像并后台启动
+#   docker compose logs -f            # 跟踪日志
+#   docker compose restart            # 重启
+#   docker compose down               # 停止并移除实例（镜像保留）
+#
+# 端口：容器内固定 8080；宿主机端口由 .env 的 APP_PORT 控制（本机 8080 已被其他项目占用，故用 18090）。
+services:
+  email-aggregator:
+    container_name: ea-p003-app
+    image: email-aggregator:p003
+    build:
+      # 构建上下文必须是仓库根（同时需要 email-aggregator-web 与 email-aggregator-go）
+      context: ../..
+      dockerfile: deploy/container/Dockerfile
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      # 如需接入真实 AI 模型（OpenAI 兼容端点），在 .env 或下方填入；留空则自动降级为本地演示回复（带 [demo] 标注）
+      # - AI_THIRD_PARTY_URL=${AI_THIRD_PARTY_URL:-}
+      # - AI_THIRD_PARTY_KEY=${AI_THIRD_PARTY_KEY:-}
+      # - AI_SELF_HOSTED_URL=${AI_SELF_HOSTED_URL:-}
+      # - AI_SELF_HOSTED_KEY=${AI_SELF_HOSTED_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

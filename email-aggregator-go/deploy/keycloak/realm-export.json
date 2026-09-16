@@ -80,6 +80,7 @@
       "secret": "ea-dev-secret-2026",
       "redirectUris": [
         "http://localhost:8080/api/auth/callback",
+        "https://localhost:8080/api/auth/callback",
         "http://localhost:5173/api/auth/callback",
         "http://127.0.0.1:8080/api/auth/callback"
       ],
@@ -96,7 +97,15 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
-      "fullScopeAllowed": true
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins",
+        "acr",
+        "tenant_id"
+      ]
     }
   ],
 
@@ -227,6 +236,75 @@
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "roles"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cs-email",
+      "name": "email",
+      "description": "Built-in email scope",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scripts": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "id": "pm-email",
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cs-profile",
+      "name": "profile",
+      "description": "Built-in profile scope",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scripts": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "id": "pm-username",
+          "name": "username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "id": "pm-email-in-profile",
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
           }
         }
       ]

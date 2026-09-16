@@ -1,4 +1,4 @@
-# setup-integration.ps1
+﻿# setup-integration.ps1
 # 拉取 Go 集成构建所需的外部依赖并生成 go.sum。
 # 前置：Go 1.22+ 已安装且在 PATH（本项目已验证 go1.22.5）。
 # 说明：依赖已钉版到兼容 go 1.22 的版本；本机直连 proxy.golang.org 不可达，

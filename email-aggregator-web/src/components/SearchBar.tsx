@@ -6,6 +6,8 @@ interface Props {
 }
 
 // forwardRef 暴露 input，供 App 通过全局快捷键 "/" 聚焦。
+// 结构上把 input 与提交按钮拼成一个整体控件：容器负责边框与焦点环，
+// 输入框自身去掉边框，视觉上不再出现"两段拼接"的割裂感。
 const SearchBar = forwardRef<HTMLInputElement, Props>(({ onSearch }, ref) => {
   const [q, setQ] = useState('')
 
@@ -17,8 +19,9 @@ const SearchBar = forwardRef<HTMLInputElement, Props>(({ onSearch }, ref) => {
       <input
         ref={ref}
         value={q}
+        type="search"
         aria-label="搜索邮件"
-        placeholder="搜索邮件内容/主题/发件人 (按 / 聚焦)"
+        placeholder="搜索邮件主题、内容或发件人（按 / 聚焦）"
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') onSearch(q)
@@ -28,13 +31,18 @@ const SearchBar = forwardRef<HTMLInputElement, Props>(({ onSearch }, ref) => {
         <button
           type="button"
           className="search-clear"
-          onClick={() => { setQ(''); onSearch('') }}
+          onClick={() => {
+            setQ('')
+            onSearch('')
+          }}
           aria-label="清空搜索"
         >
-          <Icon name="x" size={18} />
+          <Icon name="x" size={16} />
         </button>
       )}
-      <button onClick={() => onSearch(q)}>搜索</button>
+      <button type="button" onClick={() => onSearch(q)}>
+        搜索
+      </button>
     </div>
   )
 })

@@ -11,11 +11,14 @@ interface Props {
 export default function NotificationFeed({ items }: Props) {
   return (
     <div className="notif-feed">
-      <h3>实时通知</h3>
+      <div className="panel-head">
+        <h2>实时通知</h2>
+        {items.length > 0 && <span className="panel-sub">最近 {items.length} 条</span>}
+      </div>
       {items.length === 0 ? (
         <p className="empty">暂无实时通知</p>
       ) : (
-        <ul className="notif-list">
+        <ul className="notif-list" aria-live="polite">
           {items.map((n, i) => {
             const meta = NOTIF_META[n.kind]
             return (
@@ -25,7 +28,7 @@ export default function NotificationFeed({ items }: Props) {
                   {meta ? meta.label : n.kind}
                 </span>
                 <span className="notif-text">{n.preview || n.accountId}</span>
-                <span className="notif-time">{new Date(n.ts * 1000).toLocaleTimeString()}</span>
+                <span className="notif-time">{new Date(n.ts * 1000).toLocaleTimeString('zh-CN')}</span>
               </li>
             )
           })}

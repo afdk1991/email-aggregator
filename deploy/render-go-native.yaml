@@ -1,0 +1,51 @@
+# 邮箱聚合平台 · Render 原生 Go 运行时蓝图（免费层，真正实时推送）
+#
+# 与根目录 render.yaml 的区别：
+#   render.yaml          → Docker 运行时（多阶段构建），构建慢、镜像大
+#   本文件               → 原生 Go 运行时，无 Docker，冷启动快、配置简单
+#
+# 适用场景：需要 WebSocket 实时推送（● 实时已连接）与 30 秒自动演示投递。
+# EdgeOne Makers 是 Serverless，无长连接，这两项做不到；本方案可以。
+#
+# 部署方式（Render 控制台，点几下即可）：
+#   New → Blueprint → 连接本仓库 → Render 自动读取本文件 → Apply
+#   或手动：New → Web Service → 选仓库 → Runtime: Go → 按下表填构建/启动命令
+
+services:
+  - type: web
+    name: email-aggregator
+    runtime: go
+    plan: free
+    # 新加坡对国内访问最快；可改为 oregon / frankfurt
+    region: singapore
+    branch: master
+    # 构建与启动都以此为工作目录
+    rootDir: email-aggregator-go
+
+    # 构建：先把前端产物灌进 webroot/dist，再用 webui 标签把 SPA 内嵌进二进制
+    buildCommand: |
+      cd ../email-aggregator-web && npm ci && npm run build
+      mkdir -p ../email-aggregator-go/webroot/dist
+      cp -r dist/. ../email-aggregator-go/webroot/dist/
+      go build -tags webui -o bin/server ./cmd/server
+
+    # 单进程同端口提供 REST + WebSocket + 页面
+    startCommand: ./bin/server
+
+    # 免费层 15 分钟无流量会休眠，健康检查路径用于唤醒
+    healthCheckPath: /api/health
+
+    envVars:
+      # 服务监听端口（cmd/server 读取 HTTP_PORT，缺省 8080）
+      - key: HTTP_PORT
+        value: "8080"
+      # go.mod 声明 go 1.26.0；若 Render 预装版本已满足可删掉这一行
+      - key: GO_VERSION
+        value: "1.26"
+      # 默认形态为 InMemory 桩，不需要 PG/MinIO/OpenSearch/Kafka。
+      # 若要接真实中间件，在此追加对应变量并把构建标签改为 integration。
+
+# 免费层限制（务必知悉）：
+#   - 750 小时/月；15 分钟无流量休眠，冷启动约 30–60 秒
+#   - 512 MB 内存、无免费持久化磁盘（重启即回到演示数据）
+#   - 构建超时 60 分钟（本项目约 2–3 分钟，充裕）

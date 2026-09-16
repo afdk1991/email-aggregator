@@ -1,0 +1,30 @@
+# Render Blueprint —— 一键在 Render 免费层部署完整功能版（含 WebSocket）
+# 用法：Render 控制台 → New → Blueprint → 选择本仓库（根目录下的 render.yaml 会被自动读取）
+#
+# 免费层限制（以 Render 官方最新为准）：
+#   - 750 小时/月 实例时长；15 分钟无流量自动休眠，再次访问冷启动约 30-60 秒
+#   - 512 MB 内存 / 0.1 CPU，构建超时 60 分钟
+#   - 免费层不提供持久化磁盘（本应用为内存态，正好不需要）
+#   - 免费额度下的 PostgreSQL 已停止新申请；本 Blueprint 不依赖数据库
+services:
+  - type: web
+    name: email-aggregator
+    runtime: docker
+    dockerfilePath: ./deploy/container/Dockerfile
+    dockerContext: .
+    plan: free
+    region: singapore
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: HTTP_PORT
+        value: "8080"
+      # AI 能力网关（ADR-010）。留空则自动降级为本地演示后端，不影响其余功能。
+      - key: AI_SELF_HOSTED_URL
+        sync: false
+      - key: AI_SELF_HOSTED_KEY
+        sync: false
+      - key: AI_THIRD_PARTY_URL
+        sync: false
+      - key: AI_THIRD_PARTY_KEY
+        sync: false

@@ -52,6 +52,8 @@ type ApiServer struct {
 	syncer   AccountSyncer       // 可选：账户同步执行器（开启 /api/accounts/{id}/sync）
 	observ   *observ.Registry    // 可选：可观测性注册表（开启 /api/metrics 与 health detail）
 	auth     *auth.AuthMiddleware // 可选：Phase 3 鉴权中间件（ADR-009 网关层阻断 + RBAC + SSO 审计）
+	sso      *SSORouter          // 可选：PKCE 授权码流 BFF 端点（/api/auth/login|callback）
+	demoPush bool                // 可选：演示端点 /api/demo/push（无鉴权写入口，默认不注册）
 	port     int
 }
 
@@ -104,6 +106,24 @@ func (s *ApiServer) WithAuth(m *auth.AuthMiddleware) *ApiServer {
 	return s
 }
 
+// WithSSO 可选挂载 PKCE 授权码流端点（/api/auth/login 302 跳转 + /api/auth/callback 换签建会话）。
+// 非破坏性：未调用或 verifier 为 nil 时不注册任何路由。
+func (s *ApiServer) WithSSO(rt *SSORouter) *ApiServer {
+	s.sso = rt
+	return s
+}
+
+// WithDemoPush 挂载演示端点 /api/demo/push（触发一封演示邮件并实时推送 WS）。
+//
+// 安全设计：该端点**默认不注册**。它没有任何鉴权，任何请求都能注入一封伪造邮件、
+// 写入元数据与检索索引并推送给在线客户端 —— 仅供前端联调与演示。
+// 调用方应受环境变量 ENABLE_DEMO 门控（与 EdgeOne 云函数版同名同语义，
+// 避免「云函数已做防护、Go 主干裸奔」的两版能力不对等）。
+func (s *ApiServer) WithDemoPush() *ApiServer {
+	s.demoPush = true
+	return s
+}
+
 // Handler 返回 http.Handler（可挂载到任意 mux / 网关之后；WS 升级由 notify.Notifier 在真实版处理）
 func (s *ApiServer) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -132,14 +152,22 @@ func (s *ApiServer) Handler() http.Handler {
 			s.wsHub.Upgrade(w, r, accountID)
 		})
 	}
-	// 演示用：触发一封新邮件并实时推送（生产由真实同步流水线驱动）
-	mux.HandleFunc("/api/demo/push", s.handleDemoPush)
+	// 演示用：触发一封新邮件并实时推送（生产由真实同步流水线驱动）。
+	// 默认**不注册** —— 该端点无鉴权且会写元数据 + 索引并推 WS，
+	// 必须由 WithDemoPush() 显式开启（调用方以 ENABLE_DEMO 门控）。
+	if s.demoPush {
+		mux.HandleFunc("/api/demo/push", s.handleDemoPush)
+	}
 	// 可观测性端点（挂载 observ 时可用）
 	if s.observ != nil {
 		mux.HandleFunc("/api/metrics", s.handleMetrics)
 	}
 	// 自包含发布形态：在 webui 构建下托管内嵌 SPA；开发态为空操作。
 	s.mountStatic(mux)
+	// SSO 登录端点须在鉴权 Wrap 之前可达（登录者尚无 Bearer token）
+	if s.sso != nil {
+		s.sso.Mount(mux)
+	}
 	// trace 中间件：注入/透传 X-Trace-ID，贯穿到业务埋点结构化日志
 	// 鉴权中间件 Wrap 在 trace 之外：先验签注入 Claims，trace 透传 X-Trace-ID
 	h := http.Handler(mux)

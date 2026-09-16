@@ -1,0 +1,26 @@
+# 构建上下文裁剪：避免把缓存/依赖/密钥打进 Docker 镜像
+.git
+.github
+.gocache
+.gopath
+**/.gocache
+**/.gopath
+.workbuddy
+.ci-logs
+.tmp_q
+.tmp_probe
+.tmp_att
+.trae
+
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+
+**/bin/
+**/*.exe
+**/*.log
+email-aggregator-go/deploy/keycloak
+email-aggregator-go/deploy/kc-token.json
+**/kms-keyring*.json

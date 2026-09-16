@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Phase 3 真实 Citus 集群分片验证（1C+2W 拓扑）
 .DESCRIPTION

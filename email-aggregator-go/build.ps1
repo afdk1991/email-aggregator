@@ -1,4 +1,4 @@
-# 跨平台发布流水线（PowerShell 版，与 build.sh 等价）。
+﻿# 跨平台发布流水线（PowerShell 版，与 build.sh 等价）。
 # 为 Windows / macOS / Linux 的 amd64 / arm64 交叉编译自包含单文件二进制并打包。
 #
 # 用法：

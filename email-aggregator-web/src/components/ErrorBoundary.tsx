@@ -37,7 +37,9 @@ export default class ErrorBoundary extends Component<Props, State> {
             <Icon name="warning" size={20} /> 页面出错
           </h2>
           <p className="error-boundary-msg">{this.state.message || '发生未知错误'}</p>
-          <button onClick={this.handleRetry}>重试</button>
+          <button onClick={this.handleRetry} className="btn btn--primary btn--lg">
+            重新加载
+          </button>
         </div>
       )
     }

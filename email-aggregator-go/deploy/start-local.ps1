@@ -155,6 +155,9 @@ $env:KAFKA_DIAL_ADDR   = '127.0.0.1:9092'
 # NewLocalKmsFromFile 在文件不存在时自动生成初始密钥并落盘，故只需指向固定路径。
 $env:KMS_KEYRING_FILE  = Join-Path $BinDir 'kms-keyring.json'
 $env:HTTP_PORT         = "$Port"
+# 本地联调需要「模拟收信」端点（/api/demo/push 无鉴权、会写库+推 WS，集成形态下默认关闭）。
+# 与 EdgeOne 云函数版 ENABLE_DEMO 同名同语义 —— 生产环境切勿设置。
+$env:ENABLE_DEMO       = 'true'
 Start-Process -FilePath $ServerExe `
     -RedirectStandardOutput (Join-Path $BinDir 'integ-webui.log') `
     -RedirectStandardError  (Join-Path $BinDir 'integ-webui.err.log') `

@@ -144,10 +144,12 @@ func (m *AuthMiddleware) Require(action Action) func(http.Handler) http.Handler 
 	}
 }
 
-// isPublicPath 判定是否免鉴权公开端点（健康检查 / metrics / favicon）。
+// isPublicPath 判定是否免鉴权公开端点（健康检查 / metrics / favicon / SSO 登录流程）。
+// /api/auth/login 与 /api/auth/callback 是登录流程本身，登录者尚无 Bearer token，必须放行。
 func isPublicPath(path string) bool {
 	switch path {
-	case "/api/health", "/health", "/api/metrics", "/metrics", "/favicon.ico":
+	case "/api/health", "/health", "/api/metrics", "/metrics", "/favicon.ico",
+		"/api/auth/login", "/api/auth/callback":
 		return true
 	}
 	return false

@@ -1,0 +1,136 @@
+# =============================================================================
+# Phase 5 / P5-K1：Keycloak 生产化栈（ADR-009 生产形态）
+# -----------------------------------------------------------------------------
+# 目标（相对 dev 版 docker-compose.keycloak.yml 的差异）：
+#   1) KC_DB=postgres（持久化，替代 dev-mem）
+#   2) start（Keycloak 24+ 默认 Quarkus 生产模式，禁用开发特性）
+#   3) HTTPS 反代：Caddy tls internal 自签证书，8443 → 双副本 8080 负载均衡
+#   4) 双副本 keycloak-a / keycloak-b（无 Infinispan，KC_CACHING_SPANS_ENABLED=false）
+#   5) 故障切换：任一副本下线，Caddy 自动摘除并继续服务（验证脚本第 8 步）
+#
+# 启动：
+#   cd deploy
+#   docker compose -f docker-compose.keycloak-prod.yml --env-file .env.keycloak-prod up -d
+#   验证：
+#   pwsh ../scripts/verify-keycloak-prod.ps1   （或 powershell 5.1 同名脚本）
+#
+# 注意：
+#   - keycloak-pg 不暴露宿主机端口，仅容器内网络可达
+#   - 自签证书 issuer 为 https://localhost:8443/realms/email-aggregator
+#     （KC_HTTP_ENABLED=true + KC_HOSTNAME=localhost + KC_PROXY_HEADERS=xforwarded，Keycloak 容器内仅 8080 明文）
+#   - 生产真环境应替换 Caddy tls internal 为真实域名证书（acme 或内部 CA）
+# =============================================================================
+
+name: kc-prod
+
+x-keycloak-base: &keycloak-base
+  image: quay.io/keycloak/keycloak:26.0
+  restart: unless-stopped
+  command: start
+  environment:
+    # ── 生产模式基础 ──
+    KC_DB: postgres
+    KC_DB_URL: "jdbc:postgresql://keycloak-pg:5432/keycloak"
+    KC_DB_USERNAME: ${KC_DB_USER:-keycloak}
+    KC_DB_PASSWORD: ${KC_DB_PASSWORD:?KC_DB_PASSWORD required in .env.keycloak-prod}
+    # KC 24+ 生产模式默认启用 HTTPS 监听器且要求密钥材料（proxy-headers=xforwarded
+    # 不再自动回退 HTTP 监听器，见 keycloak/keycloak#27597），须显式开启 HTTP 监听器；
+    # 容器内仅 8080 明文，真实 TLS 由 Caddy 8443 终结（KC_HTTPS_PORT 会再启用 HTTPS
+    # 监听器要求证书，故不设；issuer 由 xforwarded 按请求动态派生：
+    # Caddy 转发 X-Forwarded-Proto=https + Host:localhost:8443 → https://localhost:8443）
+    KC_HTTP_ENABLED: "true"
+    # 外部访问地址：纯主机名（KC 26 不接受 host:port 形式，
+    # "neither a plain hostname nor a valid URL"）
+    KC_HOSTNAME: localhost
+    KC_HOSTNAME_STRICT: "false"
+    KC_PROXY_HEADERS: "xforwarded"
+    # 无 Infinispan 集群：必须关闭跨节点缓存（26.x 多副本关键坑）
+    KC_CACHING_SPANS_ENABLED: "false"
+    # 健康检查端点 /health/ready /health/live（KC 24+ 起 env 名由 KC_HEALTH_ENDPOINTS 更名为 KC_HEALTH_ENABLED，旧名不再生效）
+    KC_HEALTH_ENABLED: "true"
+    # 引导管理员（仅首启生效；KC_BOOTSTRAP_* 为 26.x 推荐替代 KC_ADMIN_*）
+    KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
+    KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD required in .env.keycloak-prod}
+    # Realm 导入（幂等：realm 已存在时跳过；仅首副本真正生效）
+    KC_STARTUP_ACTION: import
+    KC_IMPORT: /opt/keycloak/data/import/realm-export.v2.json
+    JAVA_OPTS: "-Xms512m -Xmx1024m"
+  volumes:
+    - ./keycloak/realm-export.v2.json:/opt/keycloak/data/import/realm-export.v2.json:ro
+  depends_on:
+    keycloak-pg:
+      condition: service_healthy
+  healthcheck:
+    # KC 24+ 健康端点在 management port 9000（非 8080），探 /health/ready
+    test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+    start_period: 60s
+  networks:
+    - kc_prod_net
+  expose:
+    - "8080"
+    - "9000"
+
+services:
+  keycloak-pg:
+    image: postgres:16-alpine
+    container_name: ea-keycloak-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: ${KC_DB_USER:-keycloak}
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?KC_DB_PASSWORD required in .env.keycloak-prod}
+    volumes:
+      - keycloak-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KC_DB_USER:-keycloak} -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - kc_prod_net
+    # 不暴露宿主机端口
+
+  keycloak-a:
+    <<: *keycloak-base
+    container_name: ea-keycloak-a
+
+  keycloak-b:
+    <<: *keycloak-base
+    container_name: ea-keycloak-b
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ea-keycloak-caddy
+    restart: unless-stopped
+    environment:
+      KC_HOST: "https://localhost:8443/realms/email-aggregator"
+    ports:
+      - "${KC_PROD_PORT:-8443}:443"
+    volumes:
+      - ./keycloak/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - keycloak-a
+      - keycloak-b
+    healthcheck:
+      # caddy admin ping 不是有效子命令；改用 admin API（:2019）探测
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    networks:
+      - kc_prod_net
+
+volumes:
+  keycloak-pg-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  kc_prod_net:
+    driver: bridge

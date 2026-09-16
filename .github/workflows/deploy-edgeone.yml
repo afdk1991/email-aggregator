@@ -1,0 +1,61 @@
+name: Deploy to EdgeOne Makers
+
+# 前端源码或部署工作区变更时，自动重建并部署到 EdgeOne Makers。
+# 需要在仓库 Settings → Secrets 中配置 EDGEONE_PAGES_API_TOKEN（严禁硬编码进仓库）。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "email-aggregator-web/**"
+      - "deploy/edgeone-app/**"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-edgeone
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install EdgeOne CLI
+        run: npm install -g edgeone@latest
+
+      - name: Build frontend
+        working-directory: email-aggregator-web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Sync build output to deploy workspace
+        run: |
+          cp email-aggregator-web/dist/index.html deploy/edgeone-app/index.html
+          rm -rf deploy/edgeone-app/assets
+          mkdir -p deploy/edgeone-app/assets
+          cp email-aggregator-web/dist/assets/* deploy/edgeone-app/assets/
+
+      - name: Smoke test cloud function
+        working-directory: deploy/edgeone-app
+        # 安装依赖后再冒烟：未装 @edgeone/pages-blob 时云函数会降级为内存模式，
+        # 测试仍会通过但覆盖不到 Blob 分支，此处装上是为了让 import 路径始终被校验。
+        # 两套断言：默认（演示形态）与 --prod（生产形态，线上实际配置）。
+        run: |
+          npm ci
+          node smoke.mjs
+          node smoke.mjs --prod
+
+      - name: Deploy
+        working-directory: deploy/edgeone-app
+        env:
+          PAGES_SOURCE: skills
+          EDGEONE_PAGES_API_TOKEN: ${{ secrets.EDGEONE_PAGES_API_TOKEN }}
+        run: edgeone makers deploy -n email-aggregator-p003 -t "$EDGEONE_PAGES_API_TOKEN" --json

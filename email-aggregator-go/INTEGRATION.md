@@ -166,8 +166,17 @@ go test ./...
 > - `MINIO_ENDPOINT=127.0.0.1:9000`（`MINIO_SECURE=false`，明文 http）
 > - `OPENSEARCH_ADDR=https://127.0.0.1:9200`（自签 TLS 仍需 `InsecureSkipVerify` + 带 `OPENSEARCH_USER`/`OPENSEARCH_PASS` 鉴权，否则 401）
 > - `KAFKA_BROKERS=127.0.0.1:9092`
+> - `KAFKA_DIAL_ADDR=127.0.0.1:9092` —— **宿主机场景必设**：Kafka advertised 通告的是容器内网名
+>   `deploy-kafka-1`，宿主机无法解析。缺此变量会导致 `mail-ingested` 事件生产失败、摄取 worker
+>   收不到事件、**邮件永不落库**（对外表现为「邮件正文一直为空」）。宿主机跑集成服务请同时设置两者。
 >
-> `deploy/docker-compose.yml` 已将 Kafka 改为 `PLAINTEXT://0.0.0.0:9092` 监听 + `PLAINTEXT://localhost:9092` 广播，使宿主 kafka-go 客户端 bootstrap 后被正确重定向（否则会拿到 `kafka:9092` 而解析失败）。监听端口当前在 `cmd/server_integration.go` 硬编码为 `8080`（无 `HTTP_PORT` 读取）。
+> `deploy/docker-compose.yml` 已将 Kafka 改为 `PLAINTEXT://0.0.0.0:9092` 监听 + `PLAINTEXT://localhost:9092` 广播，使宿主 kafka-go 客户端 bootstrap 后被正确重定向（否则会拿到 `kafka:9092` 而解析失败）。
+>
+> **监听端口**：默认 `8080`，可用环境变量 `HTTP_PORT` 覆盖（`cmd/server_integration.go:93` 与
+> `cmd/server/main.go:131` 均已接线）。注意**只认 `HTTP_PORT`，设置 `PORT` 无效**；
+> 本机多项目并存时用 `HTTP_PORT=8090` 避开项目002 占用的 `8080`。
+>
+> *（本条原写作「监听端口硬编码为 `8080`（无 `HTTP_PORT` 读取）」，经核对代码与实际不符，已于 2026-09-16 更正。）*
 
 ## 6. 替换步骤（生产落地）
 

@@ -56,8 +56,17 @@ func TestOpenSearchIndex_IndexSearchRemove(t *testing.T) {
 	if indexReq.Method != http.MethodPost {
 		t.Errorf("index method = %q, want POST", indexReq.Method)
 	}
-	if !strings.Contains(indexReq.Path, "mail-default-acc1/_doc/m1") {
-		t.Errorf("index path = %q, want contains mail-default-acc1/_doc/m1", indexReq.Path)
+	if !strings.Contains(indexReq.Path, "mail-default/_doc/m1") {
+		t.Errorf("index path = %q, want contains mail-default/_doc/m1", indexReq.Path)
+	}
+	// ADR-009 起索引按**租户**物理隔离（mail-<tenantId>），accountId 不再出现在索引名里
+	// （避免"每账户一索引"造成索引爆炸）。账户归属下沉为文档字段，故此处必须断言
+	// 它确实被写进了文档体 —— 否则该文档将无法被任何账户检索到。
+	if strings.Contains(indexReq.Path, "acc1") {
+		t.Errorf("index path = %q, want NO accountId in index name (ADR-009)", indexReq.Path)
+	}
+	if !strings.Contains(indexReq.Body, `"accountId":"acc1"`) {
+		t.Errorf("index body missing accountId field: %s", indexReq.Body)
 	}
 
 	// ── Search ──
@@ -68,8 +77,13 @@ func TestOpenSearchIndex_IndexSearchRemove(t *testing.T) {
 	if searchReq.Method != http.MethodPost {
 		t.Errorf("search method = %q, want POST", searchReq.Method)
 	}
-	if !strings.Contains(searchReq.Path, "mail-default-acc1/_search") {
-		t.Errorf("search path = %q, want contains mail-default-acc1/_search", searchReq.Path)
+	if !strings.Contains(searchReq.Path, "mail-default/_search") {
+		t.Errorf("search path = %q, want contains mail-default/_search", searchReq.Path)
+	}
+	// ADR-009 起"同租户多账户"的隔离完全落在 bool.filter.term.accountId 上：
+	// 索引名已不含 accountId，一旦这个 term 过滤丢失，同租户下不同账户的邮件会互相串号。
+	if !strings.Contains(searchReq.Body, `"accountId":"acc1"`) {
+		t.Errorf("search body missing accountId term filter (cross-account leak risk): %s", searchReq.Body)
 	}
 	if !strings.Contains(searchReq.Body, "multi_match") {
 		t.Errorf("search body missing multi_match: %s", searchReq.Body)
@@ -97,8 +111,8 @@ func TestOpenSearchIndex_IndexSearchRemove(t *testing.T) {
 	if removeReq.Method != http.MethodDelete {
 		t.Errorf("remove method = %q, want DELETE", removeReq.Method)
 	}
-	if !strings.Contains(removeReq.Path, "mail-default-acc1/_doc/m1") {
-		t.Errorf("remove path = %q, want contains mail-default-acc1/_doc/m1", removeReq.Path)
+	if !strings.Contains(removeReq.Path, "mail-default/_doc/m1") {
+		t.Errorf("remove path = %q, want contains mail-default/_doc/m1", removeReq.Path)
 	}
 }
 

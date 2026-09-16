@@ -130,6 +130,11 @@ func main() {
 	// 监听端口：默认 8080，可用环境变量 HTTP_PORT 覆盖（本机多项目并存时避免端口冲突）。
 	srv := api.NewApiServer(metadata, index, notifier, envPort("HTTP_PORT", 8080))
 
+	// 本命令（构建标签 !integration）定位为前端联调的**演示服务器**，故演示端点恒开。
+	// 生产/集成形态是 cmd/server_integration.go（integration 标签），
+	// 那里的 /api/demo/push 由 ENABLE_DEMO 门控且**默认关闭**。
+	srv.WithDemoPush()
+
 	// 挂载 WebSocket 实时推送 Hub（零依赖 RFC6455）：让前端通过 /ws 接收 new-mail 实时通知。
 	hub := notify.NewHub(notifier)
 	srv.WithWSHub(hub)

@@ -12,12 +12,19 @@ interface Props {
 
 function fmtDate(ts: number): string {
   if (!ts) return ''
-  return new Date(ts * 1000).toLocaleString()
+  return new Date(ts * 1000).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 // 邮件详情模态：点击列表项打开，展示完整邮件内容。
 // mail 优先（含正文/收件人/附件），命中项 hit 仅含预览。
 // 仅当存在权威 mail 时提供「标记已读/未读」「删除」操作。
+// 结构：固定头部（主题+元信息）→ 可滚动正文 → 固定底部操作条。
 export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
@@ -85,41 +92,71 @@ export default function MailDetail({ mail, hit, onClose, onToggleRead, onDelete 
         <button ref={closeRef} className="modal-close" onClick={onClose} aria-label="关闭详情对话框">
           <Icon name="x" size={20} />
         </button>
-        <h3 id="mail-detail-subject" className="mail-detail-subject">{subject}</h3>
-        <div className="mail-detail-meta">
-          <div>来自：{from}</div>
-          {mail && <div>收件：{to}</div>}
-          <div>时间：{fmtDate(date)}</div>
-          {mail?.hasAttachment && (
-            <div className="attachments">
-              <div className="attach-title">
-                <Icon name="paperclip" size={14} /> 含 {mail.attachments?.length ?? 0} 个附件
+
+        {/* 固定头部：主题 + 元信息（滚动正文时保持可见） */}
+        <div className="modal-head">
+          <h3 id="mail-detail-subject" className="mail-detail-subject">
+            {subject}
+          </h3>
+          <dl className="mail-detail-meta">
+            <dt>发件人</dt>
+            <dd>{from || '—'}</dd>
+            {mail && (
+              <>
+                <dt>收件人</dt>
+                <dd>{to}</dd>
+              </>
+            )}
+            <dt>时间</dt>
+            <dd>{fmtDate(date) || '—'}</dd>
+            {mail && (
+              <>
+                <dt>状态</dt>
+                <dd>
+                  <span className={`read-state ${mail.read ? 'read' : 'unread'}`}>
+                    {mail.read ? '已读' : '未读'}
+                  </span>
+                </dd>
+              </>
+            )}
+            {mail?.hasAttachment && (
+              <div className="attachments">
+                <div className="attach-title">
+                  <Icon name="paperclip" size={14} /> 含 {mail.attachments?.length ?? 0} 个附件
+                </div>
+                <ul className="attach-list">
+                  {(mail.attachments ?? []).map((a, i) => (
+                    <li key={i} className="attach-item">
+                      <span className="attach-name">{a.filename}</span>
+                      <span className="attach-meta">
+                        {a.contentType} · {(a.sizeBytes / 1024).toFixed(1)} KB
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="attach-list">
-                {(mail.attachments ?? []).map((a, i) => (
-                  <li key={i} className="attach-item">
-                    <span className="attach-name">{a.filename}</span>
-                    <span className="attach-meta">
-                      {a.contentType} · {(a.sizeBytes / 1024).toFixed(1)} KB
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {mail && (
-            <div className={`read-state ${mail.read ? 'read' : 'unread'}`}>
-              {mail.read ? '已读' : '未读'}
-            </div>
-          )}
+            )}
+          </dl>
         </div>
-        <pre className="mail-detail-body">{displayBody}</pre>
+
+        {/* 可滚动正文 */}
+        <div className="modal-body">
+          <pre className="mail-detail-body">{displayBody}</pre>
+        </div>
+
+        {/* 固定底部操作条：低频/破坏性操作靠右，与阅读动线分离 */}
         {mail && (
-          <div className="detail-actions">
-            <button onClick={() => onToggleRead?.(mail)} className="detail-btn">
+          <div className="modal-foot">
+            <button onClick={() => onToggleRead?.(mail)} className="btn btn--secondary">
+              <Icon name={mail.read ? 'envelope' : 'check'} size={15} />
               {mail.read ? '标记未读' : '标记已读'}
             </button>
-            <button onClick={() => onDelete?.(mail)} className="detail-btn danger">
+            <button
+              onClick={() => onDelete?.(mail)}
+              className="btn btn--danger"
+              style={{ marginLeft: 'auto' }}
+            >
+              <Icon name="trash" size={15} />
               删除
             </button>
           </div>

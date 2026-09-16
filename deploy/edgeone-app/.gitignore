@@ -1,0 +1,21 @@
+# 环境变量与密钥（禁止入库）
+.env
+.env.*
+!.env.example
+
+# 平台产物
+.edgeone/
+.edgeone-assets/
+node_modules/
+
+# 前端构建产物 —— 与根 .gitignore 忽略 email-aggregator-web/dist/ 一致，同样不入库。
+# 它们由 deploy.ps1 的 [1/4][2/4] 步生成（npm run build + 拷贝到本目录）。
+# 入库会造成「仓库里的产物 vs 源码」静默漂移：改完前端忘了重新构建提交，
+# 部署出来的仍是旧的，而在 diff 里看不出来 —— 本项目已因此踩过两次坑。
+assets/
+index.html
+
+# Go 构建缓存
+.gocache/
+.gopath/
+*.exe

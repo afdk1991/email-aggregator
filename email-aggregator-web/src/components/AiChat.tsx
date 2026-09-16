@@ -23,7 +23,7 @@ export default function AiChat({ accountId }: Props) {
     setError(null)
     try {
       const req: ChatRequest = {
-        tenantId: 'demo-tenant',
+        tenantId: __DEMO_MODE__ ? 'demo-tenant' : 'default-tenant',
         tenantTier: 'public',
         accountId,
         capability: 'chat',
@@ -35,12 +35,9 @@ export default function AiChat({ accountId }: Props) {
       setMessages([...next, { role: 'model', content: resp.content }])
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      // 占位无真实 LLM 时后端返回 422/405；映射为明确的"未配置"提示，而非裸 HTTP 错误。
-      setError(
-        /422|405|404|not found|gateway|ai/i.test(msg)
-          ? 'AI 网关未配置：后端未接入真实 LLM 端点（当前为占位）'
-          : msg,
-      )
+      // 后端已返回人类可读的中文错误（如未配置上游）时原样展示；
+      // 只有裸 HTTP 状态码才映射为通用文案，避免把具体原因吞掉。
+      setError(/^HTTP \d+$/.test(msg) ? 'AI 服务暂不可用，请稍后重试' : msg)
     } finally {
       setBusy(false)
     }
@@ -48,23 +45,36 @@ export default function AiChat({ accountId }: Props) {
 
   return (
     <div className="ai-chat">
-      <h2>AI 助手（ADR-010）</h2>
+      <div className="panel-head">
+        <h2>AI 助手</h2>
+        <span className="panel-sub">ADR-010</span>
+      </div>
       <div className="ai-messages">
         {messages.length === 0 && (
-          <p className="empty">向 AI 提问（需 integration 构建挂载 AI 网关）</p>
+          <div className="empty-state">
+            <Icon name="send" size={22} />
+            <p>向 AI 提问</p>
+            <span>试试「总结这封邮件」或「提炼待办事项」</span>
+          </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`ai-msg ${m.role}`}>
-            <b>{m.role === 'user' ? '你' : 'AI'}</b>：{m.content}
+            <b>{m.role === 'user' ? '你' : 'AI'}</b>
+            {m.content}
           </div>
         ))}
-        {error && <div className="error">AI 错误：{error}</div>}
+        {error && (
+          <div className="alert error" role="alert">
+            <Icon name="warning" size={16} />
+            <span>{error}</span>
+          </div>
+        )}
       </div>
       <div className="ai-input">
         <textarea
           value={input}
           aria-label="输入 AI 问题"
-          placeholder="输入问题…"
+          placeholder="输入问题…（Enter 发送，Shift+Enter 换行）"
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -73,8 +83,10 @@ export default function AiChat({ accountId }: Props) {
             }
           }}
         />
-        <button onClick={send} disabled={busy} aria-label="发送提问">
-          {busy ? '思考中…' : (
+        <button onClick={send} disabled={busy} className="btn btn--primary" aria-label="发送提问">
+          {busy ? (
+            '思考中…'
+          ) : (
             <>
               发送 <Icon name="send" size={14} />
             </>

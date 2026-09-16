@@ -1,0 +1,326 @@
+{
+  "realm": "email-aggregator",
+  "displayName": "Email Aggregator Platform",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "roles": {
+    "realm": [
+      {
+        "id": "ea-owner",
+        "name": "owner",
+        "description": "Tenant owner — full control including admin.tenant",
+        "composite": false
+      },
+      {
+        "id": "ea-admin",
+        "name": "admin",
+        "description": "Tenant admin — account.manage + account.create + mail.write + mail.read",
+        "composite": false
+      },
+      {
+        "id": "ea-member",
+        "name": "member",
+        "description": "Regular member — mail.read + mail.write",
+        "composite": false
+      },
+      {
+        "id": "ea-viewer",
+        "name": "viewer",
+        "description": "Read-only — mail.read only",
+        "composite": false
+      }
+    ]
+  },
+  "groups": [
+    {
+      "id": "g-tenant-acme",
+      "name": "tenant:acme",
+      "path": "/tenant:acme",
+      "attributes": {
+        "tenant_id": [
+          "acme"
+        ]
+      },
+      "subGroups": [
+        {
+          "id": "g-acme-owner",
+          "name": "owner",
+          "path": "/tenant:acme/owner"
+        },
+        {
+          "id": "g-acme-member",
+          "name": "member",
+          "path": "/tenant:acme/member"
+        }
+      ]
+    },
+    {
+      "id": "g-tenant-globex",
+      "name": "tenant:globex",
+      "path": "/tenant:globex",
+      "attributes": {
+        "tenant_id": [
+          "globex"
+        ]
+      },
+      "subGroups": [
+        {
+          "id": "g-globex-admin",
+          "name": "admin",
+          "path": "/tenant:globex/admin"
+        },
+        {
+          "id": "g-globex-viewer",
+          "name": "viewer",
+          "path": "/tenant:globex/viewer"
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "id": "ea-backend",
+      "clientId": "email-aggregator-go",
+      "name": "Email Aggregator Go Backend",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "ea-dev-secret-2026",
+      "redirectUris": [
+        "http://localhost:8080/api/auth/callback",
+        "https://localhost:8080/api/auth/callback",
+        "http://localhost:5173/api/auth/callback",
+        "http://127.0.0.1:8080/api/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080"
+      ],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins",
+        "acr",
+        "tenant_id"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "u-acme-owner",
+      "username": "alice@acme.test",
+      "email": "alice@acme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Alice",
+      "lastName": "Owner",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice-secret-2026",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "u-acme-member",
+      "username": "bob@acme.test",
+      "email": "bob@acme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Bob",
+      "lastName": "Member",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob-secret-2026",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "u-globex-admin",
+      "username": "carol@globex.test",
+      "email": "carol@globex.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Carol",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "carol-secret-2026",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "u-globex-viewer",
+      "username": "dave@globex.test",
+      "email": "dave@globex.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Dave",
+      "lastName": "Viewer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dave-secret-2026",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clientScopes": [
+    {
+      "id": "cs-tenant-id",
+      "name": "tenant_id",
+      "description": "Custom claim: tenant_id derived from group attribute",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scripts": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "id": "pm-tenant-id-group-attr",
+          "name": "tenant_id from group attribute",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "claim.name": "groups",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cs-roles",
+      "name": "roles",
+      "description": "Standard roles scope",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scripts": "true"
+      },
+      "protocolMappers": [
+        {
+          "id": "pm-roles",
+          "name": "roles claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cs-email",
+      "name": "email",
+      "description": "Built-in email scope",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scripts": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "id": "pm-email",
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cs-profile",
+      "name": "profile",
+      "description": "Built-in profile scope",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scripts": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "id": "pm-username",
+          "name": "username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "id": "pm-email-in-profile",
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "defaultDefaultClientScopes": [
+    "profile",
+    "email",
+    "roles",
+    "web-origins",
+    "acr",
+    "tenant_id"
+  ],
+  "bruteForceStrategy": "MULTIPLE"
+}

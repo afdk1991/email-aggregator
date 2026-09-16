@@ -1,4 +1,4 @@
-# 以"管理员"身份运行 PowerShell，将自包含二进制注册为 Windows 服务并启动。
+﻿# 以"管理员"身份运行 PowerShell，将自包含二进制注册为 Windows 服务并启动。
 # 服务名：EmailAggregator；二进制路径按实际放置位置修改。
 
 $bin  = "C:\Program Files\EmailAggregator\email-aggregator-windows-amd64.exe"

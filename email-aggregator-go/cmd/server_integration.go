@@ -121,14 +121,23 @@ func main() {
 	// assembleAuthMiddleware 在 sso 构建标签下读取 OIDC_* 环境变量构造验签器；
 	// 未配置或非 sso 构建时返回 nil，服务器回退至 PoC 无鉴权模式（向后兼容）。
 	authMiddleware := assembleAuthMiddleware(ctx, adapters.Bus)
+	ssoRouter := assembleSSORouter(ctx, adapters.Bus)
 	apiSrv := api.NewApiServer(adapters.Metadata, adapters.Index, adapters.Notifier, port).
 		WithAIGateway(aiRouter).
 		WithAccounts(adapters.Accounts).
 		WithCredentialVault(vault).
 		WithAccountSyncer(syncer).
 		WithObserv(observ.Default())
+	// 演示端点门控（与 EdgeOne 云函数版 ENABLE_DEMO 同名同语义）：默认关闭。
+	// /api/demo/push 无鉴权、会写元数据 + 检索索引并推 WS，生产环境不得开放。
+	if env("ENABLE_DEMO", "") == "true" {
+		apiSrv = apiSrv.WithDemoPush()
+	}
 	if authMiddleware != nil {
 		apiSrv = apiSrv.WithAuth(authMiddleware)
+	}
+	if ssoRouter != nil {
+		apiSrv = apiSrv.WithSSO(ssoRouter)
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/", apiSrv.Handler())
