@@ -1,12 +1,12 @@
 # ============================================================
 # 项目003 · 邮箱聚合平台 —— CI 工作流
 # 触发：push 到 main/master / 任意 PR
-# 三套实现各自独立的 Job（Go 主干 / TS PoC / React 前端）：
-#   - Go  ：go build / go vet / go test / go build -tags integration
-#   - TS  ：demo + 单测 + tsc --noEmit（Node 22，--experimental-strip-types）
-#   - Web ：tsc + vite build
-# 注：真实中间件（PG/MinIO/OpenSearch/Kafka）端到端联调需 Docker 栈，
-#    不在本 CI 内执行（见 tests/integration_real_e2e.ts，本地手动运行）。
+# 三套实现各自独立的 Job（Go 主干 / TS PoC / React 前端），
+# 外加 version-guard（版本一致性）与 integration（真实中间件）。
+#   - Go   ：go build / go vet / go test / go build -tags integration
+#   - TS   ：demo + 单测 + tsc --noEmit（Node 22，--experimental-strip-types）
+#   - Web  ：tsc + vite build
+#   - 集成 ：service 容器拉真实 PG / MinIO / OpenSearch / Kafka 跑端到端
 # ============================================================
 name: CI
 
@@ -161,16 +161,19 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U agg -d mailagg"
           --health-interval 5s --health-timeout 5s --health-retries 15
+      # ⚠️ MinIO 已从 Docker Hub 下架（`minio/minio` → pull access denied /
+      #    repository does not exist）。必须在 Quay 拉取，且**固定 RELEASE 版本**
+      #    而非 :latest —— 它决定 S3 兼容行为，漂移会让"同一提交今天过明天挂"。
+      #    另：该镜像基于 ubi-micro，**没有 bash / curl / 甚至 sh**，
+      #    故不能写 `--health-cmd "bash -c ..."`（旧写法从未真正生效过）。
+      #    改为在 steps 里显式轮询 /minio/health/live，见"等待 MinIO 就绪"。
       minio:
-        image: minio/minio:latest
+        image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
         command: server /data
         env:
           MINIO_ROOT_USER: agg
           MINIO_ROOT_PASSWORD: agg-secret
         ports: ["9000:9000"]
-        options: >-
-          --health-cmd "bash -c 'exec 3<>/dev/tcp/localhost/9000' || exit 1"
-          --health-interval 5s --health-timeout 5s --health-retries 15
       opensearch:
         image: opensearchproject/opensearch:2.17.1
         env:
@@ -216,6 +219,22 @@ jobs:
       - name: TS deps
         working-directory: email-aggregator
         run: npm ci
+
+      # MinIO 镜像内无 curl/sh，无法用 service health-cmd 探活，
+      # 故在 runner 侧轮询其健康端点，把"镜像没起来"变成显式失败，
+      # 而不是让后面的集成测试抛一堆连接拒绝（难定位）。
+      - name: 等待 MinIO 就绪
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1; then
+              echo "MinIO 已就绪（第 ${i} 次探测）"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MinIO 未在 80 秒内就绪。请确认 quay.io/minio/minio 镜像可拉取，且 9000 端口已映射。"
+          exit 1
 
       - name: Go 集成测试（真实 Kafka e2e：roundtrip/DLQ/幂等消费）
         working-directory: email-aggregator-go

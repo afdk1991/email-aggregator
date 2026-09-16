@@ -129,6 +129,42 @@ jobs:
         run: npm install -g edgeone@${{ env.EDGEONE_CLI_VERSION }}
 
       # ─────────────────────────────────────────────────────────────────────
+      #  ⑤-0 凭据预检
+      #      缺失时立刻给出可操作的配置指引，而不是等发布器跑到一半抛一个
+      #      晦涩的错误。演练模式（dry_run）不部署，故不需要凭据。
+      #      注意：绝不回显令牌内容，只回显长度。
+      # ─────────────────────────────────────────────────────────────────────
+      - name: 预检 EDGEONE_PAGES_API_TOKEN
+        env:
+          TOKEN: ${{ secrets.EDGEONE_PAGES_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "演练模式：跳过凭据预检"
+            exit 0
+          fi
+          if [ -z "${TOKEN}" ]; then
+            {
+              echo "### ✗ 无法发布：缺少仓库 Secret"
+              echo ""
+              echo "需要配置 **\`EDGEONE_PAGES_API_TOKEN\`**（EdgeOne 部署令牌）。"
+              echo ""
+              echo "配置路径：仓库 → Settings → Secrets and variables → Actions → New repository secret"
+              echo ""
+              echo "| 项 | 值 |"
+              echo "|----|----|"
+              echo "| Name | \`EDGEONE_PAGES_API_TOKEN\` |"
+              echo "| Secret | EdgeOne 控制台签发的部署令牌 |"
+              echo ""
+              echo "> 未配置前，本工作流会在发布前中止 —— 这是**预期行为**："
+              echo "> 宁可显式失败，也不让线上版本悄悄停在旧值。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::缺少 Secret EDGEONE_PAGES_API_TOKEN，已中止发布（配置指引见本次运行摘要）"
+            exit 1
+          fi
+          echo "凭据已就绪（长度 ${#TOKEN} 字符，内容不打印）"
+
+      # ─────────────────────────────────────────────────────────────────────
       #  ⑤ 发布（单一实现：本地与 CI 走完全相同的代码路径）
       #     该脚本依次完成：版本门禁 → 复用 dist → 五处产物同步与复验 →
       #     项目绑定播种 → 冒烟（演示态/生产态）→ 部署 → 线上全接口验证。
