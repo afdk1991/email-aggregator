@@ -19,7 +19,7 @@
 
 const DEFAULT_ACCOUNT = 'acc_demo'
 const APP_VERSION = 'MALLV0.0.0'
-const APP_VERSION_CODE = 0
+const APP_VERSION_CODE = 1
 const STORE_NAME = 'mailbox'
 // v2：演示数据清理后启用新键，等同于把 Blob 里旧种子数据整体作废（无需手工删库）。
 const STATE_KEY = 'state.v2.json'

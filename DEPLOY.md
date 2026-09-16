@@ -284,7 +284,7 @@ CI 的 `deploy-edgeone.yml` 已内建此项，失败即让 job 失败（不再�
 
 1. **打开页面**：必须带**完整 query**（缺 `eo_token` 会 401）。
 2. **确认接口健康**：访问 `/api/health`，应返回
-   `{"ok":true,...,"mode":"serverless-blob","demo":false,"version":"MALLV0.0.0","versionCode":0}`；
+   `{"ok":true,...,"mode":"serverless-blob","demo":false,"version":"MALLV0.0.0","versionCode":1}`；
    若为 `serverless-memory`，说明 Blob SDK 未生效（见排查清单第 9 条）。
    **`version` 是当前线上版本号**，应与 `VERSION` 文件一致 —— 这是"部署版本号可追踪"的在线证据。
 3. **确认 UI 数据**：页面账户芯片应与 `GET /api/accounts` 返回一致

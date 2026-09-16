@@ -11,14 +11,14 @@ export interface AppVersion {
   readonly canonical: string
   /** 剥离前缀的 x.y.z 形态，供有格式约束的场合使用。 */
   readonly semver: string
-  /** 单调递增整数码 = major*10000 + minor*100 + patch。 */
+  /** 严格单调的正整数码 = major*10000 + minor*100 + patch + 1。 */
   readonly code: number
 }
 
 export const APP_VERSION: AppVersion = {
   canonical: "MALLV0.0.0",
   semver: "0.0.0",
-  code: 0,
+  code: 1,
 } as const
 
 export default APP_VERSION

@@ -51,9 +51,16 @@ const VERSION_JSON = path.join(ROOT, 'version.json')
 
 const DEFAULT_PREFIX = 'MALLV'
 // code 的进位基数：minor/patch 各两位，故 major 上限 9999、minor/patch 上限 99。
-// 该上限远高于实际需要，且 MALLV99.99.99 → 999999 远小于 Android 的 2100000000 硬上限。
+// 该上限远高于实际需要，且 MALLV99.99.99 → 1000000 远小于 Android 的 2100000000 硬上限。
 const MINOR_BASE = 100
 const MAJOR_BASE = 10000
+// 末尾必须 +1，不能省。
+//   Android / HarmonyOS / iOS 都要求版本码是**正整数**，0 会被直接拒绝。
+//   实测：Gradle 报 `android.defaultConfig.versionCode is set to 0, but it should be
+//   a positive integer`，assembleDebug 直接 BUILD FAILED —— 也就是说按不带 +1 的公式，
+//   初始版本 MALLV0.0.0 根本出不了 Android 包。
+//   +1 后：0.0.0→1、0.0.1→2、0.1.0→101、1.0.0→10001，仍然严格单调。
+const CODE_OFFSET = 1
 
 function fail(msg) {
   process.stderr.write(`[version] 错误：${msg}\n`)
@@ -85,7 +92,7 @@ function derive(raw) {
     patch,
     semver,
     canonical: `${prefix}${semver}`,
-    code: major * MAJOR_BASE + minor * MINOR_BASE + patch,
+    code: major * MAJOR_BASE + minor * MINOR_BASE + patch + CODE_OFFSET,
     channel: raw.channel ?? 'dev',
     updatedAt: raw.updatedAt ?? null,
   }
@@ -245,7 +252,7 @@ export interface AppVersion {
   readonly canonical: string
   /** 剥离前缀的 x.y.z 形态，供有格式约束的场合使用。 */
   readonly semver: string
-  /** 单调递增整数码 = major*10000 + minor*100 + patch。 */
+  /** 严格单调的正整数码 = major*10000 + minor*100 + patch + 1。 */
   readonly code: number
 }
 
@@ -327,7 +334,8 @@ var Canonical = ${JSON.stringify(v.canonical)}
 // Semver 是剥离前缀的 x.y.z 形态，供有格式约束的场合使用。
 var Semver = ${JSON.stringify(v.semver)}
 
-// Code 是单调递增整数码 = major*10000 + minor*100 + patch。
+// Code 是严格单调的正整数码 = major*10000 + minor*100 + patch + 1。
+// （Android / HarmonyOS 的 versionCode 必须是正整数，0 会被拒绝，故整体 +1。）
 var Code = ${v.code}
 
 // Prefix 是版本前缀，默认 MALLV。

@@ -10,6 +10,6 @@
 module.exports = {
   canonical: "MALLV0.0.0",
   semver: "0.0.0",
-  code: 0,
+  code: 1,
   prefix: "MALLV",
 }

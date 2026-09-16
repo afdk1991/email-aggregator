@@ -17,8 +17,9 @@ var Canonical = "MALLV0.0.0"
 // Semver 是剥离前缀的 x.y.z 形态，供有格式约束的场合使用。
 var Semver = "0.0.0"
 
-// Code 是单调递增整数码 = major*10000 + minor*100 + patch。
-var Code = 0
+// Code 是严格单调的正整数码 = major*10000 + minor*100 + patch + 1。
+// （Android / HarmonyOS 的 versionCode 必须是正整数，0 会被拒绝，故整体 +1。）
+var Code = 1
 
 // Prefix 是版本前缀，默认 MALLV。
 var Prefix = "MALLV"

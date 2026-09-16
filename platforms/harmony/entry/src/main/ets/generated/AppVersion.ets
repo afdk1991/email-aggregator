@@ -8,4 +8,4 @@
 
 export const APP_VERSION_CANONICAL: string = "MALLV0.0.0"
 export const APP_VERSION_SEMVER: string = "0.0.0"
-export const APP_VERSION_CODE: number = 0
+export const APP_VERSION_CODE: number = 1

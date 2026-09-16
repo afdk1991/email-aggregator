@@ -6,7 +6,7 @@
     "派生值由 tools 计算，不在此处冗余存储：",
     "  canonical = prefix + major.minor.patch      （用户可见 / 安装包名 / 镜像 tag / git tag）",
     "  semver    = major.minor.patch               （npm version、iOS CFBundleShortVersionString 等有格式约束处）",
-    "  code      = major*10000 + minor*100 + patch （Android / HarmonyOS versionCode，单调递增整数）"
+    "  code      = major*10000 + minor*100 + patch + 1 （Android / HarmonyOS/iOS versionCode，必须为正整数故 +1）"
   ],
   "prefix": "MALLV",
   "major": 0,
