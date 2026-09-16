@@ -1,7 +1,7 @@
 {
   "name": "email-aggregator-edgeone",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "邮箱聚合平台 · EdgeOne Makers 部署形态（静态 SPA + Node 云函数 API）",
   "comment": "无 build script：前端产物已预构建在根目录（index.html + assets/），后端为 Node 云函数，平台会自动安装 dependencies。",
   "dependencies": {

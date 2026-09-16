@@ -417,6 +417,27 @@ const TARGETS = [
     ],
   },
 
+  // ── EdgeOne Makers 部署工作区元数据 ───────────────────────────────────
+  // 这两处是「部署形态」的包元数据，CLI 打包与平台构建时读它。
+  // 它们与业务代码无关，极易被漏掉，导致「项目版本号 MALLV0.0.0 / 部署工作区 1.0.0」并存。
+  {
+    id: 'edgeone-pkg',
+    file: 'deploy/edgeone-app/package.json',
+    label: 'EdgeOne 部署工作区包元数据',
+    edits: [jsonEdit('version', 'version（semver）', (v) => v.semver)],
+  },
+  {
+    id: 'edgeone-lock',
+    file: 'deploy/edgeone-app/package-lock.json',
+    label: 'EdgeOne 部署工作区锁文件版本',
+    edits: [
+      jsonEdit('version', 'version（semver）', (v) => v.semver),
+      // lockfile v3 的「根包」挂在 packages 对象下、键名为空串，
+      // 点分路径因此写作 'packages..version'（jsonGet 会正确地取 packages['']）。
+      jsonEdit('packages..version', 'packages[""].version（semver）', (v) => v.semver),
+    ],
+  },
+
   // ── 容器与编排 ────────────────────────────────────────────────────────
   {
     id: 'docker-compose-tag',
@@ -512,6 +533,20 @@ const TARGETS = [
   },
 
   // ── HarmonyOS 工程 ────────────────────────────────────────────────────
+  {
+    id: 'harmony-app-json5',
+    file: 'platforms/harmony/AppScope/app.json5',
+    label: '鸿蒙应用清单（versionCode / versionName，DevEco 打包读取）',
+    edits: [
+      // app.json5 是 JSON5，本工程的键名带引号，故正则必须写成 "versionCode":\s*…
+      // 若用裸 `versionCode: \d+` 会漏匹配 —— 这条落点曾因此整条丢失，
+      // 表现为 bump 后鸿蒙版本号静默不更新，直到 platforms/harmony/scripts/prepare.mjs
+      // 的一致性断言在出包时才失败。
+      regexEdit(/"versionCode":\s*\d+/, 'versionCode', (v) => `"versionCode": ${v.code}`),
+      regexEdit(/"versionName":\s*'[^']*'/, 'versionName', (v) => `"versionName": '${v.canonical}'`),
+    ],
+  },
+
   // ── 各端版本常量模块（整文件生成，供运行时读取，是"版本可追踪"的落点）────
   {
     id: 'web-version-ts',

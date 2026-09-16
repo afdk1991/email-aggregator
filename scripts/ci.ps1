@@ -26,23 +26,47 @@ function Step($msg) { Write-Host "`n[$([DateTime]::Now.ToString('HH:mm:ss'))] $m
 function Ok($m)     { Write-Host "  [ok] $m" -ForegroundColor Green }
 function Bad($m)    { Write-Host "  [FAIL] $m" -ForegroundColor Red; $script:fails++ }
 
-# ── 定位 Node >=22.6 ──
+# ── 定位 Node >= 22.6 ──
+# 不硬编码托管运行时的「构建号后缀」：它随环境升级变化（22.22.2-2 → 22.22.2-3，
+# 甚至换大版本），硬编码会让本脚本在某次环境升级后直接报「未找到 Node」，
+# 而项目本身毫无变化 —— 这种"环境一动、脚本就废"的失败极难定位。
+# 改为扫描托管版本目录并取最高版本，再依次回退到常见安装位置与 PATH。
 $node = $null
-$candidates = @(
-    (Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions\22.22.2-2\node.exe'),
-    (Join-Path $env:ProgramFiles 'nodejs\node.exe')
-)
+$candidates = New-Object System.Collections.Generic.List[string]
+
+$managedRoot = Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions'
+if (Test-Path $managedRoot) {
+    Get-ChildItem -LiteralPath $managedRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^\d+\.' } |
+        Sort-Object -Property @{ Expression = { [version]($_.Name -replace '-.*$', '') } } -Descending |
+        ForEach-Object { $candidates.Add((Join-Path $_.FullName 'node.exe')) }
+    $cur = Join-Path $managedRoot 'current\node.exe'
+    if (Test-Path $cur) { $candidates.Add($cur) }
+}
+
+$pf = $env:ProgramFiles
+if ($pf) { $candidates.Add((Join-Path $pf 'nodejs\node.exe')) }
+$pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+if ($pf86) { $candidates.Add((Join-Path $pf86 'nodejs\node.exe')) }
+$onPath = Get-Command node -ErrorAction SilentlyContinue
+if ($onPath) { $candidates.Add($onPath.Source) }
+
 foreach ($c in $candidates) {
-    if (Test-Path $c) {
-        $v = & $c --version 2>$null
-        if ($v -match 'v(\d+)\.') {
-            $major = [int]$Matches[1]
-            if ($major -ge 22) { $node = $c; break }
-        }
+    if (-not (Test-Path $c)) { continue }
+    $raw = (& $c --version 2>$null)
+    $ver = ("$raw" -replace '^v', '').Trim()
+    $parsed = $null
+    if ([version]::TryParse($ver, [ref]$parsed)) {
+        # 阈值 22.6：--experimental-strip-types 自该版本起可用
+        if ($parsed -ge [version]'22.6.0') { $node = $c; break }
     }
 }
-if (-not $node) { Write-Host "[FAIL] 未找到 Node >=22.6（--experimental-strip-types 必需）。请安装或配置托管 Node 22。" -ForegroundColor Red; exit 1 }
+if (-not $node) {
+    Write-Host "[FAIL] 未找到 Node >= 22.6（--experimental-strip-types 必需）。请安装托管 Node 22 或将其加入 PATH。" -ForegroundColor Red
+    exit 1
+}
 $npm = Join-Path (Split-Path $node) 'npm.cmd'
+if (-not (Test-Path $npm)) { $npm = 'npm' }
 Write-Host "Node: $(& $node --version)  ($node)" -ForegroundColor Gray
 
 # ── 1) TS PoC ──

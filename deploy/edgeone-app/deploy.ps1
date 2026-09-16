@@ -1,55 +1,63 @@
-﻿# 一键重新部署「邮箱聚合平台」到 EdgeOne Makers（Windows / PowerShell 版）
+﻿# ============================================================
+#  一键重新部署「邮箱聚合平台」到 EdgeOne Makers（Windows / PowerShell）
+# ============================================================
 #
-# 用法：
-#   powershell -ExecutionPolicy Bypass -File .\deploy.ps1
-#   powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -ProjectName my-project
-#   $env:EDGEONE_TOKEN="xxx"; powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+#  本脚本只是 scripts/deploy-edgeone.mjs 的薄壳。
+#  发布逻辑**只有一处实现**（那个 Node 脚本），本地 Windows/macOS/Linux 与 CI
+#  走完全相同的代码路径，只有"谁来调用"不同。保留本文件的原因很单纯：
+#  Windows 上习惯右键/双击运行 .ps1，比手打 node 命令顺手。
+#
+#  发布器依次完成：
+#    ① 版本门禁（version.json → 全部落点，漂移即中止）
+#    ② 前端构建（npm run build）
+#    ③ 产物同步（五处目标 + 逐文件 SHA-256 复验，并清理陈旧残留）
+#    ④ 项目绑定（edgeone-project.json → .edgeone/project.json，防止 CLI 另建项目）
+#    ⑤ 本地冒烟（演示形态 + 生产形态各一套）→ 部署
+#    ⑥ 线上全接口验证（-VerifyLive）
+#
+#  用法：
+#    powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+#    powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -ProjectName my-project
+#    powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -SkipBuild      # 复用已有 dist
+#    powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -DryRun         # 演练，不真正部署
+#    powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -VerifyLive     # 部署后跑线上验证
+#    $env:EDGEONE_TOKEN="xxx"; powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+#
+#  注意：本文件含中文，**必须带 UTF-8 BOM**，否则 Windows PowerShell 5.1 会按
+#  ANSI(GBK) 解码并解析失败（见 scripts/check-ps1-encoding.ps1）。
+# ============================================================
 param(
-    [string]$ProjectName = "email-aggregator-p003"
+    [string]$ProjectName = "",
+    [switch]$SkipBuild,
+    [switch]$DryRun,
+    [switch]$VerifyLive
 )
 
-$ErrorActionPreference = "Stop"
-$env:PAGES_SOURCE = "skills"
+$ErrorActionPreference = 'Stop'
 
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Root = Resolve-Path (Join-Path $Here "..\..")
-$Web = Join-Path $Root "email-aggregator-web"
+$Root = Resolve-Path (Join-Path $Here '..\..')
+$Deployer = Join-Path $Root 'scripts\deploy-edgeone.mjs'
 
-Write-Host "==> [1/4] 构建前端" -ForegroundColor Cyan
-Push-Location $Web
-try { npm run build } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { throw "前端构建失败" }
+if (-not (Test-Path -LiteralPath $Deployer)) {
+    Write-Host "[FAIL] 找不到发布器：$Deployer" -ForegroundColor Red
+    exit 2
+}
 
-Write-Host "==> [2/4] 同步构建产物到部署根" -ForegroundColor Cyan
-Copy-Item (Join-Path $Web "dist\index.html") (Join-Path $Here "index.html") -Force
-$assets = Join-Path $Here "assets"
-if (Test-Path $assets) { Remove-Item $assets -Recurse -Force }
-New-Item -ItemType Directory -Path $assets | Out-Null
-Copy-Item (Join-Path $Web "dist\assets\*") $assets -Force
-Write-Host "    静态资源已就位: $((Get-ChildItem $assets).Count) 个文件"
+$nodeArgs = @($Deployer)
+if ($ProjectName) { $nodeArgs += @('--project', $ProjectName) }
+if ($SkipBuild) { $nodeArgs += '--skip-build' }
+if ($DryRun) { $nodeArgs += '--dry-run' }
+if ($VerifyLive) { $nodeArgs += '--verify-live' }
 
-Write-Host "==> [2.5/4] 恢复项目绑定（防止 CLI 按名字另建项目）" -ForegroundColor Cyan
-$edgeoneDir = Join-Path $Here ".edgeone"
-if (-not (Test-Path $edgeoneDir)) { New-Item -ItemType Directory -Path $edgeoneDir | Out-Null }
-Copy-Item (Join-Path $Here "edgeone-project.json") (Join-Path $edgeoneDir "project.json") -Force
-$pid2 = (Get-Content (Join-Path $Here "edgeone-project.json") | ConvertFrom-Json).ProjectId
-Write-Host "    绑定 ProjectId: $pid2"
-
-Write-Host "==> [3/4] 本地冒烟测试（演示形态 + 生产形态各一套）" -ForegroundColor Cyan
-Push-Location $Here
+Push-Location $Root
 try {
-    node smoke.mjs
-    if ($LASTEXITCODE -ne 0) { throw "演示形态冒烟未通过，已中止部署" }
-    node smoke.mjs --prod
-    if ($LASTEXITCODE -ne 0) { throw "生产形态冒烟未通过，已中止部署" }
-} finally { Pop-Location }
+    & node @nodeArgs
+    $code = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+}
 
-Write-Host "==> [4/4] 部署到 EdgeOne Makers" -ForegroundColor Cyan
-Push-Location $Here
-try {
-    if ($env:EDGEONE_TOKEN) {
-        edgeone makers deploy -n $ProjectName -t $env:EDGEONE_TOKEN --json
-    } else {
-        edgeone makers deploy -n $ProjectName --json
-    }
-} finally { Pop-Location }
+if ($code -ne 0) { Write-Host "[FAIL] 发布未完成（exit $code）" -ForegroundColor Red }
+exit $code

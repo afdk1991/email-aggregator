@@ -1,61 +1,208 @@
-name: Deploy to EdgeOne Makers
+# ============================================================================
+#  官网自动发布 —— EdgeOne Makers（项目003「邮箱聚合平台」）
+# ============================================================================
+#
+#  这是本项目的「官方网站」发布通道：master 上的前端/部署区/版本源一旦变化，
+#  自动完成【版本门禁 → 前端构建 → 产物同步 → 本地冒烟 → 部署 → 线上全接口验证】，
+#  并把部署 ID、预览 URL、线上验证结果写进本次运行的 Step Summary 留档。
+#
+#  触发条件（两条，互不重叠）：
+#    · push 到 master 且命中 paths 白名单 —— 日常内容更新自动上线
+#    · workflow_dispatch            —— 手动重发 / 演练（dry_run 输入）
+#      paths 白名单刻意包含 version.json / VERSION / scripts/*.mjs：
+#      只改版本号也是一种"需要重新发布"的变更，漏掉会让线上版本号停在旧值。
+#
+#  与 release-multiplatform.yml 的分工：
+#    本工作流 = 官网（Web/Serverless 形态）自动上线，每次 push 即发
+#    那个工作流 = 六端安装包 + GitHub Release，只在打 MALLV* 标签时发
+#    两者共用同一个版本源 version.json，故版本号不可能各说各话。
+#
+#  ⚠️ 必须配置的 Secret（Settings → Secrets and variables → Actions）：
+#      EDGEONE_PAGES_API_TOKEN —— EdgeOne 部署令牌，严禁硬编码进仓库
+#
+#  ⚠️ 本工作流不会被并发取消（cancel-in-progress: false）：
+#      发布是"同步资源 → 上传 → 部署"的多步变更，中途取消会停在
+#      "部署工作区已换新、线上仍是旧版"的中间态，比慢几秒危险得多。
+# ============================================================================
 
-# 前端源码或部署工作区变更时，自动重建并部署到 EdgeOne Makers。
-# 需要在仓库 Settings → Secrets 中配置 EDGEONE_PAGES_API_TOKEN（严禁硬编码进仓库）。
+name: deploy-official
 
 on:
   push:
     branches: [master]
     paths:
-      - "email-aggregator-web/**"
-      - "deploy/edgeone-app/**"
+      # 内容本体
+      - 'email-aggregator-web/**'
+      - 'deploy/edgeone-app/**'
+      # 发布所需的工具链（改了发布逻辑本身也必须重新走一次发布流程）
+      - 'scripts/version.mjs'
+      - 'scripts/sync-web-assets.mjs'
+      - 'scripts/deploy-edgeone.mjs'
+      # 版本源与其它部署形态的版本落点（容器镜像 tag / OCI 标签）
+      - 'version.json'
+      - 'VERSION'
+      - 'deploy/container/**'
+      # 本工作流自身
+      - '.github/workflows/deploy-edgeone.yml'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '演练模式：只做到本地冒烟，不真正部署'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-  group: deploy-edgeone
-  cancel-in-progress: true
+  group: deploy-official
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  # 固定 CLI 版本：edgeone 的行为在次版本间有差异（本项目实测 1.6.17-beta.1
+  # 与 1.6.40 的 `deploy --json` 输出结构不同），用 @latest 会让"同样的提交
+  # 今天能发、明天发不出去"。升级请连同本行一起提交。
+  EDGEONE_CLI_VERSION: '1.6.40'
 
 jobs:
-  deploy:
+  publish:
+    name: 构建 → 同步 → 冒烟 → 部署 → 线上验证
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: 检出
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: 安装 Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install EdgeOne CLI
-        run: npm install -g edgeone@latest
+      # ─────────────────────────────────────────────────────────────────────
+      #  ① 版本一致性门禁
+      #     比部署器内部的 verify 更严：这里额外要求「sync 之后工作区无改动」，
+      #     即落点必须是**已提交**的状态。否则会出现"CI 现场把版本号修补成正确值
+      #     然后发布"，而仓库里仍是错的 —— 下一个拿旧提交构建的人重新踩坑。
+      # ─────────────────────────────────────────────────────────────────────
+      - name: 版本一致性门禁（全部落点必须已被提交）
+        run: |
+          set -euo pipefail
+          node scripts/version.mjs sync
+          if ! git diff --quiet; then
+            echo "::error::版本落点与 version.json 不一致。请在本地执行 node scripts/version.mjs sync 并提交。"
+            git --no-pager diff --stat
+            exit 1
+          fi
+          node scripts/version.mjs verify
 
-      - name: Build frontend
+      - name: 工具链语法自检
+        run: |
+          set -euo pipefail
+          node --check scripts/version.mjs
+          node --check scripts/sync-web-assets.mjs
+          node --check scripts/deploy-edgeone.mjs
+
+      # ─────────────────────────────────────────────────────────────────────
+      #  ② 前端构建
+      # ─────────────────────────────────────────────────────────────────────
+      - name: 构建前端 SPA
         working-directory: email-aggregator-web
         run: |
-          npm ci
+          set -euo pipefail
+          npm ci || npm install
           npm run build
 
-      - name: Sync build output to deploy workspace
-        run: |
-          cp email-aggregator-web/dist/index.html deploy/edgeone-app/index.html
-          rm -rf deploy/edgeone-app/assets
-          mkdir -p deploy/edgeone-app/assets
-          cp email-aggregator-web/dist/assets/* deploy/edgeone-app/assets/
-
-      - name: Smoke test cloud function
+      # ─────────────────────────────────────────────────────────────────────
+      #  ③ 部署工作区依赖（云函数冒烟需要 @edgeone/pages-blob，
+      #     未安装时云函数会降级为内存态 —— 冒烟仍会通过，但覆盖不到 Blob 分支）
+      # ─────────────────────────────────────────────────────────────────────
+      - name: 安装部署工作区依赖
         working-directory: deploy/edgeone-app
-        # 安装依赖后再冒烟：未装 @edgeone/pages-blob 时云函数会降级为内存模式，
-        # 测试仍会通过但覆盖不到 Blob 分支，此处装上是为了让 import 路径始终被校验。
-        # 两套断言：默认（演示形态）与 --prod（生产形态，线上实际配置）。
-        run: |
-          npm ci
-          node smoke.mjs
-          node smoke.mjs --prod
+        run: npm ci || npm install
 
-      - name: Deploy
+      # ─────────────────────────────────────────────────────────────────────
+      #  ④ 安装 EdgeOne CLI
+      # ─────────────────────────────────────────────────────────────────────
+      - name: 安装 EdgeOne CLI
+        run: npm install -g edgeone@${{ env.EDGEONE_CLI_VERSION }}
+
+      # ─────────────────────────────────────────────────────────────────────
+      #  ⑤ 发布（单一实现：本地与 CI 走完全相同的代码路径）
+      #     该脚本依次完成：版本门禁 → 复用 dist → 五处产物同步与复验 →
+      #     项目绑定播种 → 冒烟（演示态/生产态）→ 部署 → 线上全接口验证。
+      #     它会把 canonical / url / deployment 写入 GITHUB_OUTPUT 供后续步骤取用。
+      # ─────────────────────────────────────────────────────────────────────
+      - name: 发布到官网
+        id: publish
         working-directory: deploy/edgeone-app
         env:
-          PAGES_SOURCE: skills
           EDGEONE_PAGES_API_TOKEN: ${{ secrets.EDGEONE_PAGES_API_TOKEN }}
-        run: edgeone makers deploy -n email-aggregator-p003 -t "$EDGEONE_PAGES_API_TOKEN" --json
+        run: |
+          set -euo pipefail
+          ARGS="--skip-build --verify-live"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "::warning::演练模式：不会真正部署"
+            ARGS="--skip-build --dry-run"
+          fi
+          # 部署器工作目录即仓库根（脚本按自身路径定位），此处只为对齐历史习惯
+          cd ../..
+          node scripts/deploy-edgeone.mjs $ARGS
+
+      # ─────────────────────────────────────────────────────────────────────
+      #  ⑥ 留档：把「发布了什么、发到哪、线上是否真的可用」写进运行摘要
+      # ─────────────────────────────────────────────────────────────────────
+      - name: 写入运行摘要
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## 官网发布 · ${{ steps.publish.outputs.canonical || '（未取得版本号）' }}"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|----|----|"
+            echo "| 规范版本号 | \`${{ steps.publish.outputs.canonical }}\` |"
+            echo "| 平台合规号 | \`${{ steps.publish.outputs.semver }}\` |"
+            echo "| 单调整数码 | \`${{ steps.publish.outputs.code }}\` |"
+            echo "| 项目 | \`${{ steps.publish.outputs.project }}\` |"
+            echo "| 部署 ID | \`${{ steps.publish.outputs.deployment }}\` |"
+            echo "| 触发 | ${{ github.event_name }} / \`${{ github.ref }}\` |"
+            echo ""
+            if [ -n "${{ steps.publish.outputs.url }}" ]; then
+              echo "### 预览链接（约 30 分钟有效）"
+              echo ""
+              echo '${{ steps.publish.outputs.url }}'
+              echo ""
+              echo "> 该链接带 \`eo_token\`，是平台预览网关的临时凭证。裸域名不带 token 返回 401 属预期，不是故障。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传部署记录
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edgeone-deploy-record-${{ steps.publish.outputs.canonical || 'unknown' }}
+          path: deploy/edgeone-app/.edgeone/last-deploy.json
+          if-no-files-found: ignore
+
+      - name: 失败时输出回滚指引
+        if: failure()
+        run: |
+          {
+            echo ""
+            echo "---"
+            echo "### ⚠️ 发布未完成"
+            echo ""
+            echo "常见成因与处置："
+            echo ""
+            echo "| 现象 | 根因 | 处置 |"
+            echo "|------|------|------|"
+            echo "| \`版本落点与 version.json 不一致\` | 本地 bump 后未提交 sync 结果 | 本地 \`node scripts/version.mjs sync\` 后提交 |"
+            echo "| \`产物同步后复验仍不一致\` | dist 与目标目录不同源 | 重新 \`npm run build\` 后本地跑一次发布器 |"
+            echo "| \`冒烟测试未通过\` | 云函数路由/契约回归 | 本地 \`cd deploy/edgeone-app && node smoke.mjs\` 复现 |"
+            echo "| 部署后线上验证失败 | 线上仍是旧版，或 token 已过期 | 控制台部署历史回滚，或重跑本工作流取新 token |"
+            echo "| \`ProjectId\` 不匹配 | 绑定文件与 \`-n\` 不同名 | 统一 \`deploy/edgeone-app/edgeone-project.json\` 与项目名 |"
+            echo ""
+            echo "回滚：EdgeOne 控制台 → 项目 → 部署历史 → 选择上一个成功部署 → 回滚。"
+          } >> "$GITHUB_STEP_SUMMARY"

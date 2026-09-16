@@ -1,6 +1,15 @@
 # 邮箱聚合平台 · 线上部署说明（DEPLOY）
 
-> 最后更新：2026-09-15 ｜ 已上线形态：EdgeOne Makers（Serverless）｜ 备选：容器化完整功能版
+> 最后更新：2026-09-16 ｜ 已上线形态：EdgeOne Makers（Serverless）｜ 备选：容器化完整功能版
+
+> 本文只讲**线上形态**：能力边界、平台配额、环境变量、排障与回滚。
+> 完整的**发布流程规范**（构建 → 内容同步 → 官网部署 → 版本发布的环节、触发条件、
+> 依赖配置与约束）见 [`部署与发布流程规范.md`](./部署与发布流程规范.md)；六端产物与
+> 版本号命名细则见 [`多端部署与版本号规范.md`](./多端部署与版本号规范.md)。
+>
+> ⚠️ 发布入口已收敛为**一份实现**：`node scripts/deploy-edgeone.mjs`
+> （`deploy/edgeone-app/deploy.ps1` 与 `deploy.sh` 只是它的薄壳）。
+> 下文 §四 的手工命令仅作原理说明，日常请直接用发布器。
 
 ---
 
@@ -74,31 +83,43 @@
 
 ## 四、构建命令与产物路径
 
+### 4.1 推荐方式：一键发布器
+
 ```bash
-# 1) 前端构建（产物：email-aggregator-web/dist）
-cd email-aggregator-web
-npm ci
-npm run build          # = tsc --noEmit && vite build
+# 一条命令完成：版本门禁 → 前端构建 → 五处产物同步 → 冒烟 → 部署（→ 线上验证）
+node scripts/deploy-edgeone.mjs                 # 全流程
+node scripts/deploy-edgeone.mjs --skip-build    # 复用已有 dist（CI 已构建时）
+node scripts/deploy-edgeone.mjs --dry-run       # 演练：做到冒烟为止，不真正部署
+node scripts/deploy-edgeone.mjs --verify-live   # 部署后跑线上全接口验证
 
-# 2) 同步产物到部署工作区（deploy/edgeone-app 即 Makers 项目根）
-cp email-aggregator-web/dist/index.html   deploy/edgeone-app/index.html
-cp email-aggregator-web/dist/assets/*     deploy/edgeone-app/assets/
+# 等价薄壳（只是转调，不含逻辑）
+powershell -ExecutionPolicy Bypass -File .\deploy\edgeone-app\deploy.ps1   # Windows
+./deploy/edgeone-app/deploy.sh                                            # macOS / Linux
+```
 
-# 3) 本地冒烟测试（22 项断言，覆盖全部线上路由）
-cd deploy/edgeone-app && node smoke.mjs
+### 4.2 手工分步（仅作原理说明，**不要**用于日常发布）
 
-# 4) 部署
-export PAGES_SOURCE=skills
+发布器把下面这些步骤收敛成了不可跳过的顺序；手工执行会漏掉版本门禁与陈旧资源清理，
+而"漏同步"不会报错 —— 线上只是安静地跑着旧包。
+
+```bash
+cd email-aggregator-web && npm ci && npm run build                    # 1) 前端构建
+node scripts/sync-web-assets.mjs                                      # 2) 五处产物同步（含清理陈旧残留）
+cd deploy/edgeone-app && node smoke.mjs && node smoke.mjs --prod      # 3) 冒烟（演示态 + 生产态）
+export PAGES_SOURCE=skills                                            # 4) 部署
 edgeone makers deploy -n email-aggregator-p003 --json
 ```
 
 **产物路径**
 
-| 产物 | 路径 |
-|------|------|
-| 前端页面 | `deploy/edgeone-app/index.html` |
-| 前端资源 | `deploy/edgeone-app/assets/` |
-| 后端 API | `deploy/edgeone-app/cloud-functions/api/[[default]].js` → 线上 `/api/*` |
+| 产物 | 路径 | 是否入库 |
+|------|------|---------|
+| 前端页面 | `deploy/edgeone-app/index.html` | ❌ 现场生成 |
+| 前端资源 | `deploy/edgeone-app/assets/` | ❌ 现场生成 |
+| 后端 API | `deploy/edgeone-app/cloud-functions/api/[[default]].js` → 线上 `/api/*` | ✅ |
+| 项目绑定（权威） | `deploy/edgeone-app/edgeone-project.json` | ✅ |
+| 项目绑定（CLI 读） | `deploy/edgeone-app/.edgeone/project.json` | ❌ 每次部署前重新播种 |
+| 部署记录 | `deploy/edgeone-app/.edgeone/last-deploy.json` | ❌ 由发布器写入 |
 
 ---
 
@@ -126,17 +147,25 @@ edgeone makers env set AI_THIRD_PARTY_KEY "sk-xxx"
 
 | 文件 | 作用 |
 |------|------|
-| `deploy/edgeone-app/cloud-functions/api/[[default]].js` | Makers 云函数入口，catch-all 承接 `/api/*` |
+| `deploy/edgeone-app/cloud-functions/api/[[default]].js` | Makers 云函数入口，catch-all 承接 `/api/*`（含 `APP_VERSION` / `APP_VERSION_CODE`） |
 | `deploy/edgeone-app/.env.example` | 环境变量模板（Makers 会据此在部署时注入同名变量） |
-| `deploy/edgeone-app/package.json` | 项目声明（无 build script；`dependencies` 供平台安装 Blob SDK） |
+| `deploy/edgeone-app/package.json` | 项目声明（无 build script；`dependencies` 供平台安装 Blob SDK；`version` 由版本工具下发） |
+| `deploy/edgeone-app/package-lock.json` | 锁文件（`version` 与 `packages[""]` 根包版本同样由版本工具下发） |
 | `deploy/edgeone-app/.gitignore` | 排除密钥、平台产物与 `node_modules` |
-| `deploy/edgeone-app/smoke.mjs` | 22 项本地冒烟测试，部署前门禁 |
-| `deploy/edgeone-app/deploy.sh` | **一键部署**（bash）：构建 → 同步 → 冒烟 → 部署 |
-| `deploy/edgeone-app/deploy.ps1` | **一键部署**（Windows PowerShell） |
-| `.github/workflows/deploy-edgeone.yml` | CI/CD：前端或部署区变更时自动冒烟 + 部署 |
+| `deploy/edgeone-app/edgeone-project.json` | **项目绑定（权威、入库）**：`Name` ↔ `ProjectId` |
+| `deploy/edgeone-app/smoke.mjs` | 本地冒烟：演示形态 23 项 + `--prod` 生产形态 7 项，部署前门禁 |
+| **`scripts/deploy-edgeone.mjs`** | **官网发布器（唯一实现）**：版本门禁 → 构建 → 五处同步 → 绑定 → 冒烟 → 部署 →（可选）线上验证 |
+| `deploy/edgeone-app/deploy.sh` / `deploy.ps1` | 发布器的薄壳（macOS/Linux 与 Windows 入口，不含逻辑） |
+| `.github/workflows/deploy-edgeone.yml` | CI/CD：master 命中 paths 白名单时自动跑完整发布链并做线上验证 |
+| **`scripts/version.mjs`** | 版本号工具链（21 个落点，`show/list/verify/sync/bump/set/artifacts`） |
+| **`scripts/sync-web-assets.mjs`** | 前端产物五处同步 + SHA-256 复验 |
+| **`version.json` / `VERSION`** | 版本权威源与派生纯文本 |
+| **`scripts/live-verify.mjs`** | 线上全接口验证（**36 项**；curl 驱动换 cookie，跨平台） |
+| `shots/live-verify.sh` | 上面这条的薄壳（`exec node scripts/live-verify.mjs "$@"`） |
 | `deploy/container/Dockerfile` | 容器化完整功能版镜像（含 WebSocket + 内嵌 SPA） |
 | `render.yaml` | Render Blueprint，免费层一键部署容器版 |
 | `.dockerignore` | 裁剪构建上下文，排除缓存与密钥 |
+| `部署与发布流程规范.md` | **流程规范总纲**（环节 / 触发 / 配置 / 对应关系与约束） |
 
 ---
 
@@ -176,16 +205,55 @@ docker run --rm -p 8080:8080 email-aggregator:latest
 
 ## 八、验证线上访问的步骤
 
-1. **打开页面**（必须带完整 query，缺 `eo_token` 会 401）：
-   在浏览器打开部署给出的完整 URL。
-2. **确认接口健康**：浏览器访问 `/api/health`，应返回 `{"ok":true,...,"mode":"serverless-blob"}`（`mode` 为 `serverless-memory` 说明 Blob SDK 未生效，见排查清单第 9 条）。
-3. **确认 UI 数据**：页面应显示 **6 个**账户芯片（演示/工作/个人邮箱 + 演示邮箱 3/个人邮箱 1/工作邮箱 1）与对应邮件。
+### 8.1 自动化（推荐）
+
+```bash
+# 发布器内置的第 ⑥ 步
+node scripts/deploy-edgeone.mjs --verify-live
+
+# 或对已有 URL 单独跑（URL 必须带 eo_token）
+node scripts/live-verify.mjs "<带 eo_token 的完整 URL>"
+bash shots/live-verify.sh "<带 eo_token 的完整 URL>"   # 等价薄壳（需可用的 bash）
+```
+
+> 实现是 **Node**（`scripts/live-verify.mjs`），不是 bash。原因：本机 bash 是残缺 shim
+> （`bash --version` 都返回 1），而线验证是发布链路的最后一道门禁，必须能跑。
+> 内部仍固定调 `curl.exe` —— 预览网关把 `eo_token` 下发为 **HttpOnly** cookie，
+> Node 的 `fetch` 拿不到它，只有 curl 的 cookie jar 能接住。
+
+`scripts/live-verify.mjs` 共 **36 项**断言，覆盖四类：
+
+| 类别 | 检查内容 |
+|------|---------|
+| 静态资源 | `GET /` 200、HTML 引用 JS/CSS 产物、JS 体量 >10KB、CSS 可获取 |
+| 生产包纯净度 | 产物中不含 `模拟收信` / `demo-tenant` / `demo/push` 等演示关键字 |
+| 无障碍令牌 | `--muted #667085`、badge `height:24px`(WCAG 2.5.8)、`@supports` 兜底、暗色主题、布局令牌 |
+| API 契约 | `mode`/`demo` 取值、账户 CRUD 全链路、退役演示账户防护、检索、`/api/demo/push` 生产形态必须 404、AI 不伪造输出、未知路径 404、SPA 深链回退 |
+
+CI 的 `deploy-edgeone.yml` 已内建此项，失败即让 job 失败（不再是"部署成功就算成功"）。
+
+### 8.2 人工（浏览器）
+
+1. **打开页面**：必须带**完整 query**（缺 `eo_token` 会 401）。
+2. **确认接口健康**：访问 `/api/health`，应返回
+   `{"ok":true,...,"mode":"serverless-blob","demo":false,"version":"MALLV0.0.0","versionCode":0}`；
+   若为 `serverless-memory`，说明 Blob SDK 未生效（见排查清单第 9 条）。
+   **`version` 是当前线上版本号**，应与 `VERSION` 文件一致 —— 这是"部署版本号可追踪"的在线证据。
+3. **确认 UI 数据**：页面账户芯片应与 `GET /api/accounts` 返回一致
+   （生产形态 `ENABLE_DEMO=false` 不再生成新种子；**历史 Blob 数据会保留**，故不是"每次都空库"）。
 4. **验证检索**：搜索框输入 `Invoice`（英文）或 `复盘`（中文），应即时命中。
 5. **验证写操作**：点开一封邮件标记已读、添加/删除一个账户，应立即生效。
-6. **验证持久化**（本次修复重点）：添加一个账户后**等待数分钟或重新部署**，该账户应仍然存在——不再随实例回收丢失。
-7. **本地门禁**：改动后先跑 `node smoke.mjs`，22/22 通过再部署。
+6. **验证持久化**：添加账户后刷新页面（或等实例回收）该账户应仍然存在。
+7. **本地门禁**：改动后先跑 `node smoke.mjs`（演示形态 23 项）与 `node smoke.mjs --prod`
+   （生产形态 7 项），全绿再部署。
 
-> ⚠️ 用 `curl` 直接请求会返回 302/401（预览网关要求浏览器完成 token 校验），这是预期行为，不是接口故障——请在浏览器中验证。
+> ⚠️ **裸域名不带 token 返回 401 属预期**，不是接口故障。
+> ⚠️ **预览 token 约 30 分钟失效**：老 token 表现为全 401 且 cookie jar 里没有 `eo_token`，
+> 极易误判为线上故障 —— 验证前请重新部署取新 token。
+> ✅ 「curl 无法验证线上」是**过时结论**（见排查清单第 12 条）：本仓库的
+> `scripts/live-verify.mjs`（Node 实现，内部用 curl + cookie jar）已完整跑通 **36/36**，
+> 并已接入 CI 与发布器第 ⑥ 步。实测 health 回 `version:"MALLV0.0.0"`，
+> 证明版本号确实随产物推送到了线上。
 
 ---
 
@@ -212,15 +280,20 @@ docker run --rm -p 8080:8080 email-aggregator:latest
 | 3 | `/api/*` 返回 HTML 而不是 JSON | 云函数文件缺少语言扩展名（必须是 `.js`/`.go`/`.py`）导致未被识别，请求回退到静态 `index.html` | 确认文件名为 `[[default]].js` |
 | 4 | 部署成功但页面空白 / 404 | 前端产物未同步到部署根，或 `assets/` 缺失 | 执行 `deploy.sh` 第 2 步重新同步 `index.html` 与 `assets/` |
 | 5 | 访问 URL 返回 401 | 复制 URL 时丢了 `?eo_token=...` 查询串 | 使用**完整** URL（含全部 query 参数） |
-| 6 | `curl` 返回 302 | 预览网关需浏览器完成 token 校验 | 改用浏览器访问，非接口故障 |
+| 6 | `curl` 不带 cookie jar 返回 302/401 | 预览网关把 `eo_token` 下发为 **HttpOnly cookie**，首次请求须用它换会话（Node 的 `fetch` 拿不到 HttpOnly 项） | 非接口故障。用 `curl -sL -c jar -b jar` 换会话，或直接用 `scripts/live-verify.mjs` |
 | 7 | 页面报 CORS / 接口 404 | 前端 `BASE='/api'` 走同源；若把前后端拆到不同域名需改 `src/api/client.ts` | 保持同源部署，或显式配置跨域与 API 基址 |
 | 8 | AI 面板一直显示 `[demo]` | 未配置 `AI_THIRD_PARTY_*` 环境变量 | 用 `edgeone makers env set` 注入；留空即为预期的演示降级行为 |
-| 9 | 数据仍被重置 / `mode=serverless-memory` | `@edgeone/pages-blob` 未安装成功，云函数降级为内存 | 确认根 `package.json` 的 `dependencies` 含该包且已提交 `package-lock.json`；平台会自动安装。降级时站点仍可用，只是不持久 |
+| 9 | 数据仍被重置 / `mode=serverless-memory` | `@edgeone/pages-blob` 未安装成功，云函数降级为内存 | 确认 `deploy/edgeone-app/package.json` 的 `dependencies` 含该包且已提交 `package-lock.json`；平台会自动安装。降级时站点仍可用，只是不持久 |
 | 9b | 添加账户后刷新又消失 | 旧版为内存态（2026-09-15 前）；或 Blob 写入抛错被静默吞掉 | 升级到 Blob 版；确认 `/api/health` 的 `mode` 为 `serverless-blob` |
 | 10 | `Makers project exceeds 40 limit` | 账号项目数达上限 | 控制台删除不用的项目，或用 `-n <已有项目名>` 复用 |
 | 11 | Docker 构建超时/过大 | 构建上下文包含了 `node_modules`、`.gopath` 等 | 已提供 `.dockerignore`；确认构建上下文为仓库根 |
-| 12 | 无法用 curl/脚本验证线上 | 预览网关对非浏览器请求返回 302/401（含静态资源），属平台访问控制 | 只能在浏览器中验证；或本地跑 `smoke.mjs` 验证逻辑。绑定自定义域名后不受此限制 |
-| 13 | 本地 `edgeone makers dev` 的 `/api/*` 返回 301/404 | dev 服务器路由与线上不一致（本地调试工具行为） | 不要以 dev 结果判断线上；以 `smoke.mjs` + 线上浏览器验证为准 |
+| 12 | ~~无法用 curl/脚本验证线上~~ **已可验证** | 旧结论源于"单发请求不保持 cookie"；实测 curl + cookie jar 可完整跑通 | 用 `node scripts/live-verify.mjs "<带 eo_token 的 URL>"`（**36 项**），已接入 CI 与发布器 ⑥。注意裸域名不带 token 仍 401、token 约 30 分钟失效 |
+| 12b | `bash: command not found` / `bash --version` 返回 1 | Windows 上的 PortableGit 是残缺 shim，连自身都起不来；原 bash 版验证脚本因此**无法在本地执行** | 已把实现移植为 Node（`scripts/live-verify.mjs`），`shots/live-verify.sh` 降为薄壳。localhost 的 shell 工具同理不要依赖 bash |
+| 13 | 本地 `edgeone makers dev` 的 `/api/*` 返回 301/404 | dev 服务器路由与线上不一致（本地调试工具行为） | 不要以 dev 结果判断线上；以 `smoke.mjs` + `live-verify.mjs` 为准 |
+| 14 | `版本落点与 version.json 不一致` | 本地 `bump` 后忘记提交 `sync` 的结果 | `node scripts/version.mjs sync` 后提交（CI 会主动拦下这种提交） |
+| 15 | `产物同步后复验仍不一致` | `dist/` 与目标目录不同源（改完前端没重新构建） | `cd email-aggregator-web && npm run build`，再跑 `node scripts/sync-web-assets.mjs` |
+| 16 | **CLI 另建了一个新项目**，旧域名 404 | `-n` 的项目名与 `edgeone-project.json` 不同名，CLI 按名字远程解析后新建 | 统一两个文件的项目名；发布器已把它做成硬断言（不同名直接拒绝部署） |
+| 17 | 同一次提交的发布"今天能发、明天发不出" | CLI 用 `@latest` 安装，次版本间 `deploy --json` 输出结构有差异 | 固定版本：`npm install -g edgeone@1.6.40`（与工作流 `EDGEONE_CLI_VERSION` 对齐） |
 
 ---
 
