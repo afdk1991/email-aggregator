@@ -178,14 +178,42 @@ edgeone makers env set AI_THIRD_PARTY_KEY "sk-xxx"
 > 故 push 到 master 时 `deploy-official` 会停在预检处。这是**预期行为**：宁可显式失败，
 > 也不让线上版本悄悄停在旧值。**本地发布不受影响**（走 EdgeOne CLI 登录态）。
 
-### 6.2 远端 CI 状态（2026-09-16 首次核对）
+### 6.2 远端 CI 状态（2026-09-16 核对与修复）
 
-| 项 | 状态 |
-|----|------|
-| `CI` 工作流 | 2026-09-12 起连续失败；根因是 **MinIO 已从 Docker Hub 下架**（`minio/minio` → `repository does not exist`），已修复：改用 `quay.io/minio/minio` 并**固定 RELEASE 版本** |
-| 本地 `ci.ps1` | 全绿 —— 差别在于**本地不跑 `integration` job**，故长期掩盖了上述问题 |
-| 本机网络 | **无法直连 Docker Hub**（curl 返回 HTTP 000），镜像可用性只能查 quay.io 等其它源求证 |
-| `部署与发布流程规范.md` | **流程规范总纲**（环节 / 触发 / 配置 / 对应关系与约束） |
+首次 push 后核对远端 CI，暴露五个从未被看见的问题，**均已修复**（提交 `a52b58e`）。
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| `integration` job 连续失败（2026-09-12 起） | **MinIO 已从 Docker Hub 下架**（`minio/minio` → `repository does not exist`），在 `Initialize containers` 阶段就失败 | 迁移到 `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`（**固定 RELEASE**，不用 `:latest`） |
+| MinIO 健康检查**形同虚设** | 该镜像基于 ubi-micro，**没有 `bash` / `sh`**，故 `options: --health-cmd "bash -c ..."` 从未真正生效 | 移除无效 health-cmd，改为 runner 侧轮询 `/minio/health/live`（40×2s），把"镜像没起来"变成显式失败 |
+| TS 集成层双 FAIL | job 只起容器，**从不建 schema / 桶** → `relation "mail_metadata" does not exist`、`The specified bucket does not exist` | 新增 `email-aggregator/scripts/bootstrap-integration.mjs`：PG 迁移 + MinIO 建桶 + 落点自检，在 Go/TS 集成测试**之前**执行 |
+| 本地全绿、远端全红 | 本地 `ci.ps1` 不跑 `integration` job，且同样缺预置步骤 —— 两边都缺，无人对照 | `ci.ps1 -Integration` 调用**同一个**预置脚本，本地与远端看到同一 schema |
+| `deploy-official` 必然失败 | 仓库**没有任何 Secrets** | 新增「预检 `EDGEONE_PAGES_API_TOKEN`」：缺失即显式失败 + Step Summary 给出配置路径，发布步骤 `skipped`（实测 run `35115522803` 按设计工作） |
+
+> 📌 **集成栈连接参数已上提到 `integration` job 级 `env:`**。此前只写在 TS 测试步骤上，
+> 想在它前面插"预置"步骤就会因取不到 env 而再抄一份 —— 必然漂移。现在预置与测试强制同源。
+>
+> 📌 **迁移文件契约**（见 `email-aggregator-go/deploy/migrations/README.md`）：新增迁移必须
+> ① **幂等**；② **纯 PG 安全**（Citus 段落用 `DO $$` 守卫）。CI 会在 `postgres:16` 上逐个重放，
+> 契约不满足即红。
+>
+> 📌 **本机网络限制**：无法直连 Docker Hub（curl 返回 HTTP 000），镜像可用性只能查 quay.io 等其它源求证。
+
+### 6.3 集成栈预置：三条路径，同一批迁移文件
+
+| 场景 | 入口 | 是否需要 Docker |
+|------|------|----------------|
+| 生产 / 本地完整栈 | `deploy/bootstrap.sh` | 是（容器内 `psql` 重放 + 建桶/索引模板/主题） |
+| **CI / 本机无 Docker** | `cd email-aggregator && node scripts/bootstrap-integration.mjs` | **否**（直接用 `pg` / `minio` 客户端） |
+| 人工运维 | `email-aggregator-go/deploy/migrations/run.sh up` | 否（`PG_DSN` 原样交给 `psql` 原生解析） |
+
+```bash
+# 只打印计划，不连任何服务
+cd email-aggregator && node scripts/bootstrap-integration.mjs --dry-run
+
+# 预置 + 跑 TS 集成层真实联调
+cd email-aggregator && node scripts/bootstrap-integration.mjs && npx --yes tsx tests/integration_real_e2e.ts
+```
 
 ---
 
