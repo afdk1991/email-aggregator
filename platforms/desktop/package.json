@@ -9,6 +9,7 @@
     "email": "afdk1991@users.noreply.github.com"
   },
   "license": "UNLICENSED",
+  "homepage": "https://email-aggregator-p003-ii6yabbf.edgeone.cool",
   "main": "src/main.cjs",
   "scripts": {
     "icon": "node ../../scripts/make-icon.mjs --out build",

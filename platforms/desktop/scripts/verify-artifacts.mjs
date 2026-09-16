@@ -10,7 +10,9 @@
  *  不能证明「运行时读到的版本也是它」。所以这里做三层证据链：
  *
  *    ① 文件名层：release/ 下每个安装包名都含 MALLVx.y.z
- *    ② 目录层：  release/<platform>-unpacked/resources/ 里存在 sidecar 与 app-dist
+ *    ② 目录层：  未打包目录的资源目录里存在 sidecar 与 app-dist
+ *                · Windows/Linux：`<outDir>/resources/`
+ *                · macOS：        `<outDir>/<ProductName>.app/Contents/Resources/`
  *    ③ 内容层：  · sidecar 二进制内含 MALLVx.y.z（Go 的 src/version 编译进去了）
  *                · app-dist/index.html 含 <meta name="app-version" content="MALLVx.y.z">
  *                · asar 内的 version.generated.cjs 与 version.json 一致
@@ -129,10 +131,36 @@ function main() {
   console.log(`[verify] 全部通过 —— 安装包确实携带 ${needle}`)
 }
 
+/**
+ * 定位「未打包目录」里的资源目录。
+ *
+ * Windows/Linux 是 `<outDir>/resources`；**macOS 不是** —— 它是
+ * `<outDir>/<ProductName>.app/Contents/Resources`。此前本函数无条件拼 `resources`，
+ * 导致 macOS 在产物全部正确产出的情况下仍报 `resources 目录存在` FAIL
+ * （实测 run 35118604475：4 个 dmg/zip 均正常，只有这项检查失败）。
+ * 按两种形态依次探测，而不是按 platform 硬编码 —— 后者会在
+ * `--dir` 手动指定目录时失配。
+ */
+function resolveResources(unpackedDir) {
+  const generic = path.join(unpackedDir, 'resources')
+  if (fs.existsSync(generic)) return generic
+  if (fs.existsSync(unpackedDir)) {
+    for (const name of fs.readdirSync(unpackedDir)) {
+      if (!name.endsWith('.app')) continue
+      const macRes = path.join(unpackedDir, name, 'Contents', 'Resources')
+      if (fs.existsSync(macRes)) return macRes
+    }
+  }
+  return generic
+}
+
 function verifyUnpacked(unpackedDir, v) {
-  const res = path.join(unpackedDir, 'resources')
+  const res = resolveResources(unpackedDir)
   if (!fs.existsSync(res)) {
-    failCheck('resources 目录存在', path.relative(REPO, res))
+    failCheck(
+      'resources 目录存在',
+      `${path.relative(REPO, res)} 不存在（期望 Windows/Linux 的 resources/，或 macOS 的 <ProductName>.app/Contents/Resources）`,
+    )
     return
   }
   console.log(`[verify] 检查未打包目录 ${path.relative(REPO, unpackedDir)}`)

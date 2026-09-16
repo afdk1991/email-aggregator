@@ -200,7 +200,57 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      # 不再使用 android-actions/setup-android@v3：它会把 runner 自带的
+      # cmdline-tools 换成自己下载的 16.0，随后在 `sdkmanager --licenses` 里失败
+      # （实测 run 35118604475：该步骤退出码 1，且整段日志无任何 ##[error] 注解，
+      #  排查成本极高）。runner 镜像本身已预装完整 Android SDK 且已接受许可，
+      # 这里只用它 + 补齐 Capacitor 8 要求的 compileSdk = 36。
+      - name: 准备 Android SDK（用 runner 预装，仅补缺）
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::未找到 Android SDK：$SDK"
+            exit 1
+          fi
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "SDK = $SDK"
+
+          SDKMGR="$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -n1)"
+          if [ -z "$SDKMGR" ]; then
+            echo "::error::$SDK/cmdline-tools 下未找到 sdkmanager"
+            exit 1
+          fi
+          echo "sdkmanager = $SDKMGR"
+
+          # Capacitor 8 的 android 模板（assets/android-template/variables.gradle）
+          # 要求 compileSdkVersion = 36；工具链为 AGP 8.13.0 / Gradle 8.14.3。
+          MISSING=""
+          [ -d "$SDK/platforms/android-36" ] || MISSING="$MISSING platforms;android-36"
+          [ -d "$SDK/build-tools/36.0.0" ] || MISSING="$MISSING build-tools;36.0.0"
+          [ -d "$SDK/platform-tools" ] || MISSING="$MISSING platform-tools"
+
+          if [ -z "$MISSING" ]; then
+            echo "所需 SDK 组件已齐备，跳过安装"
+          else
+            echo "待安装：$MISSING"
+            # 许可已由 runner 镜像接受，这里再跑一次幂等（失败不致命）
+            yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+            ok=0
+            for i in 1 2 3; do
+              # shellcheck disable=SC2086
+              if "$SDKMGR" --install $MISSING; then ok=1; break; fi
+              echo "第 ${i} 次 sdkmanager 安装失败，15 秒后重试"
+              sleep 15
+            done
+            if [ "$ok" != "1" ]; then
+              echo "::error::Android SDK 组件安装失败：$MISSING"
+              exit 1
+            fi
+          fi
+
+          "$SDKMGR" --list_installed 2>/dev/null | sed -n '1,40p' || true
 
       - name: 构建前端 SPA
         working-directory: email-aggregator-web
@@ -291,13 +341,14 @@ jobs:
       #      （config.js: iosPlatformTemplateArchive = 'ios-spm-template.tar.gz'），
       #      只生成 App/App.xcodeproj，根本没有顶层 App.xcworkspace。
       # build.mjs 会做 prepare + cap sync，并按实际形态选 -workspace / -project。
+      # 签名开关必须作为 **xcodebuild 的 build setting** 传入 —— 只写 step env
+      # 在 Xcode 26 上无效：实测 run 35118604475 给了 CODE_SIGNING_ALLOWED=NO
+      # 仍报 `Signing for "App" requires a development team.`。
+      # --unsigned 会显式下发 CODE_SIGNING_ALLOWED=NO / CODE_SIGNING_REQUIRED=NO /
+      # CODE_SIGN_IDENTITY="" / CODE_SIGN_ENTITLEMENTS="" 四个 build setting。
       - name: 归档（未签名）
         working-directory: platforms/mobile
-        env:
-          CODE_SIGNING_ALLOWED: 'NO'
-          CODE_SIGNING_REQUIRED: 'NO'
-          CODE_SIGN_IDENTITY: ''
-        run: node scripts/build.mjs ios
+        run: node scripts/build.mjs ios --unsigned
 
       - name: 校验产物版本号
         working-directory: platforms/mobile

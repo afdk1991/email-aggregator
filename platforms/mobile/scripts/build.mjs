@@ -12,6 +12,7 @@
  *    node scripts/build.mjs android --debug      Android Debug APK
  *    node scripts/build.mjs android --apk-only   只出 APK（不上 AAB）
  *    node scripts/build.mjs ios                 iOS Release 归档（需 macOS + Xcode）
+ *    node scripts/build.mjs ios --unsigned       同上，跳过签名（CI 用；产未签名 xcarchive）
  *
  *  ──────────────────────────────────────────────────────────────────────────
  *  环境前置（本机不满足时本脚本会明确报错，不会静默产出一个空包）：
@@ -38,6 +39,7 @@ const argv = process.argv.slice(2)
 const platform = argv.find((a) => !a.startsWith('--'))
 const debug = argv.includes('--debug')
 const apkOnly = argv.includes('--apk-only')
+const unsigned = argv.includes('--unsigned')
 
 function resolveCapCli() {
   let pkgJson
@@ -135,6 +137,24 @@ function buildIOS() {
   }
   console.log(`[mobile] 工程形态：${wsName ? 'CocoaPods 工作区' : 'SPM 工程'}（${wsName ?? projName}）`)
 
+  // ---------------------------------------------------------------------------
+  //  未签名归档：签名开关必须作为**命令行 build setting** 传给 xcodebuild
+  //  ---------------------------------------------------------------------------
+  //  只设环境变量不够：实测（Xcode 26.6 / run 35118604475）在 step env 里给了
+  //  CODE_SIGNING_ALLOWED=NO 仍然失败 ——
+  //    error: Signing for "App" requires a development team. Select a development
+  //           team in the Signing & Capabilities editor. (in target 'App' ...)
+  //  该错误在 GatherProvisioningInputs 阶段抛出，早于签名动作。作为 build setting
+  //  显式传入才会真正跳过签名与 entitlements 解析。
+  const signArgs = unsigned
+    ? [
+        'CODE_SIGNING_ALLOWED=NO',
+        'CODE_SIGNING_REQUIRED=NO',
+        'CODE_SIGN_IDENTITY=',
+        'CODE_SIGN_ENTITLEMENTS=',
+      ]
+    : []
+
   const args = [
     ...targetArgs,
     '-scheme',
@@ -143,8 +163,10 @@ function buildIOS() {
     debug ? 'Debug' : 'Release',
     '-archivePath',
     path.join(iosDir, 'build', 'App.xcarchive'),
+    ...signArgs,
     'archive',
   ]
+  if (unsigned) console.log('[mobile] --unsigned：已下发 CODE_SIGNING_ALLOWED=NO 等 build setting')
   console.log('[mobile] xcodebuild archive')
   run('xcodebuild', args)
   return [path.join(iosDir, 'build', 'App.xcarchive')]
