@@ -1,0 +1,114 @@
+# ============================================================================
+#  electron-builder 配置 —— 项目003「邮箱聚合平台」桌面端（PC 安装包）
+#
+#  产物命名：EmailAggregator-<MALLVx.y.z>-<os>-<arch>.<ext>
+#  例：      EmailAggregator-MALLV0.0.0-win-x64.exe
+#            EmailAggregator-MALLV0.0.1-mac-arm64.dmg
+#            EmailAggregator-MALLV0.0.2-linux-x86_64.AppImage
+#
+#  ${env.MALLV_VERSION} 由 scripts/prepare.mjs 从仓库根 version.json 读出后注入环境变量，
+#  因此安装包文件名与 version.json 永远一致，不存在"打包脚本里另写一份版本号"的漂移面。
+#  （本行的 artifactName 由 scripts/version.mjs 维护，勿手工改。）
+# ============================================================================
+
+appId: com.afdk1991.email-aggregator
+productName: EmailAggregator
+copyright: Copyright © 2026 邮箱聚合平台
+# 顶层 artifactName —— 所有平台共用（可在各平台段内单独覆盖，见 dmg 段）。
+# 必须是**顶格**键：缩进会成为上一条目的子键，导致 YAML 解析失败。
+artifactName: ${productName}-${env.MALLV_VERSION}-${os}-${arch}.${ext}
+
+directories:
+  output: release
+  buildResources: build
+
+# 只打包运行期真正需要的文件；src/ 与 package.json 即可（主进程为纯 CJS，无构建步骤）
+files:
+  - src/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/*.md'
+
+# 随包外置资源（不进 asar，需以真实文件路径被 spawn / readFile 访问）
+extraResources:
+  # 内嵌 SPA 的构建产物：作为「Go 内置服务未能启动」时的静态兜底页面
+  - from: resources/app-dist
+    to: app-dist
+    filter: ['**/*']
+  # 按平台/架构交叉编译好的 Go 主干单二进制（sidecar）
+  - from: resources/bin
+    to: bin
+    filter: ['**/*']
+
+# ---------------------------------------------------------------- Windows
+win:
+  icon: build/icon.png
+  # NSIS 安装包为主（x64 + arm64），另附免安装 portable（x64）便于绿色分发
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: portable
+      arch: [x64]
+  # 未配置代码签名证书时保持 unsigned；如需签名，设置环境变量
+  # CSP_KEY / CSC_LINK + CSC_KEY_PASSWORD 后去掉下面一行
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 邮箱聚合平台
+  # 卸载时保留用户数据（邮件缓存与配置位于 %APPDATA%）
+  deleteAppDataOnUninstall: false
+
+# portable 必须单独命名。
+# 顶层 artifactName 用的是 ${os}，在 Windows 上求值为 "win"，于是
+# nsis(x64) 与 portable(x64) 都会落到 release/EmailAggregator-<ver>-win-x64.exe —
+# **同一个路径**，后构建的 portable 会静默覆盖掉 NSIS 安装包（实测确认）。
+portable:
+  artifactName: ${productName}-${env.MALLV_VERSION}-${os}-${arch}-portable.${ext}
+
+# ------------------------------------------------------------------- macOS
+mac:
+  icon: build/icon.png
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  # 未配置 Apple 开发者证书时不签名（本地/CI 均可直接出包）。
+  # 正式分发请改为 mac.identity: "<Developer ID Application: ...>" 并开启 notarize。
+  identity: null
+
+dmg:
+  title: 邮箱聚合平台 ${env.MALLV_VERSION}
+  artifactName: ${productName}-${env.MALLV_VERSION}-${os}-${arch}.${ext}
+
+# ------------------------------------------------------------------- Linux
+linux:
+  icon: build/icon.png
+  category: Network
+  maintainer: afdk1991 <afdk1991@users.noreply.github.com>
+  synopsis: 邮箱聚合平台 —— 多账户邮件统一管理与 AI 智能助手
+  description: |
+    把多个邮箱账户聚合为单一收件箱，提供统一检索、实时推送与 AI 摘要。
+    本包内置零外部依赖的本地服务，安装后即可离线使用。
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+    - target: rpm
+      arch: [x64]
+  desktop:
+    entry:
+      Name: 邮箱聚合平台
+      Comment: 多账户邮件统一管理与 AI 智能助手
+      Categories: Network;Email;
+
+# ---------------------------------------------------------------- 发布配置
+publish: null

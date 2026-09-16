@@ -1,0 +1,17 @@
+{
+  "$comment": [
+    "项目003「邮箱聚合平台」——全项目唯一版本号权威源（Single Source of Truth）。",
+    "禁止手工编辑本文件以外的任何版本号落点；一律通过 `node scripts/version.mjs sync` 下发。",
+    "规范形态：MALLV<major>.<minor>.<patch>，初始版本 MALLV0.0.0，后续按 MALLV0.0.1 / MALLV0.0.2 逐级递增。",
+    "派生值由 tools 计算，不在此处冗余存储：",
+    "  canonical = prefix + major.minor.patch      （用户可见 / 安装包名 / 镜像 tag / git tag）",
+    "  semver    = major.minor.patch               （npm version、iOS CFBundleShortVersionString 等有格式约束处）",
+    "  code      = major*10000 + minor*100 + patch （Android / HarmonyOS versionCode，单调递增整数）"
+  ],
+  "prefix": "MALLV",
+  "major": 0,
+  "minor": 0,
+  "patch": 0,
+  "channel": "dev",
+  "updatedAt": "2026-09-16"
+}

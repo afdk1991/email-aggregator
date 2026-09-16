@@ -1,0 +1,13 @@
+# 依赖
+node_modules/
+
+# 打包产物
+release/
+
+# 打包前由 prepare.mjs 装配的随包资源（均为可再生成的构建产物）
+resources/bin/
+resources/app-dist/
+
+# 由 scripts/make-icon.mjs 从源码确定性生成，不入库（与「构建产物不入库」约定一致）
+build/icon.png
+build/icon.ico

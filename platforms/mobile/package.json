@@ -1,0 +1,23 @@
+{
+  "name": "email-aggregator-mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "邮箱聚合平台 · 移动端外壳（Capacitor）—— Android / iOS 原生工程与安装包",
+  "scripts": {
+    "add:android": "cap add android",
+    "add:ios": "cap add ios",
+    "prepare:web": "node ../../scripts/sync-web-assets.mjs",
+    "prepare:native": "node scripts/prepare.mjs",
+    "build:android": "node scripts/build.mjs android",
+    "build:ios": "node scripts/build.mjs ios",
+    "verify": "node scripts/verify-artifacts.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
+  }
+}

@@ -1,6 +1,7 @@
 # 邮箱聚合平台 · 前端（React+TS+Vite 构建产物）
 # 多阶段构建：构建阶段 -> nginx 静态服务 + /api、/ws 反向代理
 FROM node:22-alpine AS builder
+LABEL org.opencontainers.image.version="MALLV0.0.0"
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --silent

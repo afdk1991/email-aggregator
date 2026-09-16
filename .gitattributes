@@ -1,0 +1,89 @@
+# ============================================================
+# 项目003 · 邮箱聚合平台 —— 换行符与文本属性
+# ============================================================
+# 为什么必须有这个文件：
+#   Windows 上 Git 默认 core.autocrlf=true，会把 checkout 出来的文本文件全部转成 CRLF。
+#   而本项目的跨平台构建依赖「工作区字节 == 仓库字节」：
+#     · scripts/version.mjs 用 \n 生成版本落点，随后逐字节比对校验 —— CRLF 会让 verify 全红；
+#     · gofmt 对 CRLF 的 .go 文件会判定为「未格式化」（`gofmt -l` 全量报错）；
+#     · 六端（Windows/macOS/Linux/Android/iOS/HarmonyOS）共用同一份前端 dist，
+#       SHA-256 必须跨平台一致，否则 sync-web-assets 的复验会失败。
+#   故统一声明 LF：让 Windows 工作区与 Linux CI 的字节完全一致。
+
+# ---------------------------------------------------------------- 默认
+* text=auto eol=lf
+
+# ---------------------------------------------------------------- 文本（显式声明）
+# 不靠 Git 的启发式猜测，尤其对含中文的 .md / .json5 / .ets 这些易被误判的类型。
+*.go         text eol=lf
+*.mod        text eol=lf
+*.sum        text eol=lf
+*.ts         text eol=lf
+*.tsx        text eol=lf
+*.js         text eol=lf
+*.mjs        text eol=lf
+*.cjs        text eol=lf
+*.json       text eol=lf
+*.json5      text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.toml       text eol=lf
+*.css        text eol=lf
+*.html       text eol=lf
+*.ets        text eol=lf
+*.xml        text eol=lf
+*.plist      text eol=lf
+*.gradle     text eol=lf
+*.properties text eol=lf
+*.txt        text eol=lf
+*.md         text eol=lf
+*.sql        text eol=lf
+*.sh         text eol=lf
+*.ps1        text eol=lf
+*.psm1       text eol=lf
+*.bat        text eol=lf
+*.cmd        text eol=lf
+Dockerfile   text eol=lf
+*.dockerignore text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+VERSION        text eol=lf
+
+# ---------------------------------------------------------------- 二进制（禁止转换）
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.svg    text eol=lf
+*.ico    binary
+*.icns   binary
+*.exe    binary
+*.dll    binary
+*.so     binary
+*.dylib  binary
+*.node   binary
+*.jar    binary
+*.hap    binary
+*.apk    binary
+*.aab    binary
+*.zip    binary
+*.7z     binary
+*.gz     binary
+*.tar    binary
+*.pdf    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.otf    binary
+*.pak    binary
+*.dat    binary
+*.bin    binary
+
+# ---------------------------------------------------------------- 生成物标记
+# 这些文件由 `node scripts/version.mjs sync` 生成，禁止手工编辑；标为 generated 便于审阅时分辨。
+VERSION                                                        linguist-generated=true
+email-aggregator-go/src/version/version.go                     linguist-generated=true
+email-aggregator-web/src/version.generated.ts                  linguist-generated=true
+platforms/desktop/src/version.generated.cjs                    linguist-generated=true
+platforms/harmony/entry/src/main/ets/generated/AppVersion.ets  linguist-generated=true

@@ -20,7 +20,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  #  ⓿ 版本门禁 —— 全项目共享一个权威版本源（version.json）。
+  #     任何落点（Go/前端/云函数/容器/桌面/移动/鸿蒙）与它不一致即失败，
+  #     避免"项目版本号"与"部署版本号"漂移。
+  # ─────────────────────────────────────────────────────────────────────────
+  version-guard:
+    name: 版本一致性门禁 (MALLV 规范)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 落点必须与 version.json 完全一致
+        run: |
+          set -euo pipefail
+          node scripts/version.mjs sync
+          if ! git diff --quiet; then
+            echo "::error::存在版本落点与 version.json 不一致。请在本地执行 node scripts/version.mjs sync 并提交。"
+            git --no-pager diff --stat
+            exit 1
+          fi
+          node scripts/version.mjs verify
+
+      - name: 工具脚本语法自检
+        run: |
+          set -euo pipefail
+          node --check scripts/version.mjs
+          node --check scripts/sync-web-assets.mjs
+          node --check scripts/make-icon.mjs
+          node --check platforms/desktop/scripts/prepare.mjs
+          node --check platforms/desktop/scripts/build.mjs
+          node --check platforms/desktop/scripts/verify-artifacts.mjs
+          node --check platforms/mobile/scripts/prepare.mjs
+          node --check platforms/mobile/scripts/build.mjs
+          node --check platforms/mobile/scripts/verify-artifacts.mjs
+          node --check platforms/harmony/scripts/prepare.mjs
+          node --check platforms/harmony/scripts/build.mjs
+
+      - name: 汇总版本信息
+        run: |
+          set -euo pipefail
+          node scripts/version.mjs show
+          {
+            echo "### 版本号：$(node scripts/version.mjs show --json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).canonical')"
+            echo ""
+            echo '```'
+            node scripts/version.mjs show
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   go:
+
     name: Go 主干 (build/vet/test)
     runs-on: ubuntu-latest
     defaults:

@@ -20,6 +20,7 @@ import (
 	"email-aggregator-go/src/security"
 	"email-aggregator-go/src/store"
 	"email-aggregator-go/src/tenant"
+	"email-aggregator-go/src/version"
 )
 
 // AccountSyncer 账户实时同步执行器（由 cmd 装配：bus + vault + 账户注册表 + 连接器工厂）。
@@ -211,7 +212,15 @@ func (s *ApiServer) handleAIChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *ApiServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	body := map[string]any{"ok": true, "service": "email-aggregator-go"}
+	// version / versionCode 取自 src/version（由 version.json 生成，可被 -ldflags -X 覆盖）：
+	// 让「线上跑的是哪个版本」可以直接从健康检查读出，无需登机器翻二进制。
+	// 多端（桌面 / 移动 / 容器 / 云函数）共用同一版本号，便于按版本追踪部署。
+	body := map[string]any{
+		"ok":          true,
+		"service":     "email-aggregator-go",
+		"version":     version.Canonical,
+		"versionCode": version.Code,
+	}
 	if s.observ != nil {
 		body["goroutines"] = runtime.NumGoroutine()
 		body["metrics"] = s.observ.Snapshot()

@@ -11,7 +11,40 @@ import type {
   SearchHit,
 } from '../types'
 
-const BASE = '/api'
+// ── API 基址解析 ───────────────────────────────────────────────────────────
+//
+// 六端部署下，页面的 origin 各不相同，不能一律用相对路径 '/api'：
+//   · Web 直访 / Go 单二进制（webui 标签）→ 与 API 同源，用相对路径即可
+//   · Electron 桌面端                      → 加载 127.0.0.1:<随机端口>，仍同源
+//   · Capacitor（Android / iOS）           → origin 是 https://localhost，必须绝对地址
+//   · HarmonyOS Web 容器                   → origin 是 resource://rawfile，必须绝对地址
+//
+// 解析优先级：localStorage['apiBase']（运行期）> VITE_API_BASE_URL（构建期）> 同源。
+// 保留运行期覆盖是为了让自部署用户不必重新打包即可指向自己的服务器。
+export function resolveApiOrigin(): string {
+  let override = ''
+  try {
+    override = localStorage.getItem('apiBase') ?? ''
+  } catch {
+    /* 隐私模式或非浏览器环境无 storage */
+  }
+  const raw = (override || import.meta.env.VITE_API_BASE_URL || '').trim()
+  return raw.replace(/\/+$/, '')
+}
+
+const BASE = `${resolveApiOrigin()}/api`
+
+/**
+ * 与 REST 同源的 WebSocket 端点（ws/wss 跟随基址协议）。
+ * 抽到网络层统一解析，避免 App 里再写一遍 origin 推断逻辑而两处漂移。
+ */
+export function wsEndpoint(accountId: string): string {
+  const origin = resolveApiOrigin()
+  const wsBase = origin
+    ? origin.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:')
+    : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`
+  return `${wsBase}/ws?accountId=${encodeURIComponent(accountId)}`
+}
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)

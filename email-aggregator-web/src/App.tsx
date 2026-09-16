@@ -15,9 +15,13 @@ import {
   deleteAccount as apiDeleteAccount,
   saveAccountCredentials,
   syncAccount,
+  wsEndpoint,
 } from './api/client'
 import type { CanonicalMail, SearchHit, NotificationPayload, AccountInfo, AccountStatus, Provider } from './types'
 import HealthBadge from './components/HealthBadge'
+// 版本号来自 version.json（经 scripts/version.mjs 生成），多端共用同一值：
+// Web / Electron 桌面 / Capacitor 移动 / HarmonyOS 全部展示同一个 MALLVx.y.z。
+import { APP_VERSION } from './version.generated'
 import SearchBar from './components/SearchBar'
 import MailList from './components/MailList'
 import AiChat from './components/AiChat'
@@ -222,9 +226,9 @@ export default function App() {
   }, [loadMails, refreshAccounts])
 
   // WebSocket 实时推送：连接 /ws?accountId=，监听 new-mail 通知，断线自动重连。
+  // 端点由网络层统一解析（多端 origin 不同），此处不再自行拼 location.host。
   useEffect(() => {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${proto}://${location.host}/ws?accountId=${encodeURIComponent(accountId)}`
+    const url = wsEndpoint(accountId)
     let ws: WebSocket | null = null
     let retryTimer: number | undefined
     let disposed = false
@@ -487,6 +491,14 @@ export default function App() {
                 {currentUnread > 99 ? '99+' : currentUnread}
               </span>
             )}
+            {/* 版本徽标：让「页面上跑的是哪个版本」可被用户与验收方直接读出，
+                与 /api/health 返回的 version 同源（均出自 version.json）。 */}
+            <span
+              className="badge idle"
+              title={`应用版本 ${APP_VERSION.canonical}（semver ${APP_VERSION.semver} / versionCode ${APP_VERSION.code}）`}
+            >
+              {APP_VERSION.canonical}
+            </span>
           </div>
         </div>
       </header>

@@ -1,0 +1,15 @@
+# 依赖
+node_modules/
+
+# 由 scripts/sync-web-assets.mjs 从 email-aggregator-web/dist 同步（构建产物）
+www/
+
+# 由 `npx cap add <platform>` 生成的原生工程 —— 属构建产物，不入库。
+# 版本号由 scripts/version.mjs sync 在生成之后写入（android/app/build.gradle、
+# ios/App/App/Info.plist 两个落点因此被标记为 optional）。
+# CI 流程即按此约定：先 cap add，再 sync，最后 build。
+android/
+ios/
+
+# Capacitor 运行时缓存
+.capacitor/

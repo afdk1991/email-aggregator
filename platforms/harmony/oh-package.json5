@@ -1,0 +1,11 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "email-aggregator-harmony",
+  "version": "0.0.0",
+  "description": "邮箱聚合平台 · HarmonyOS 外壳（ArkTS Web 容器承载统一 SPA）",
+  "main": "",
+  "author": "afdk1991",
+  "license": "UNLICENSED",
+  "dependencies": {},
+  "devDependencies": {}
+}

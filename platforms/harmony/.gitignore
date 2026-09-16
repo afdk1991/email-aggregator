@@ -1,0 +1,23 @@
+# Node / 鸿蒙依赖与构建缓存
+node_modules/
+oh_modules/
+.hvigor/
+oh-package-lock.json5
+
+# 构建产物
+build/
+entry/build/
+.hap/
+
+# 由 scripts/sync-web-assets.mjs 从 email-aggregator-web/dist 同步（构建产物）
+entry/src/main/resources/rawfile/www/
+
+# 由 scripts/make-icon.mjs 确定性生成
+AppScope/resources/base/media/*.png
+entry/src/main/resources/base/media/*.png
+
+# 本机签名配置（含私钥路径与密码，切勿入库）
+signature/
+*.p12
+*.cer
+*.p7b

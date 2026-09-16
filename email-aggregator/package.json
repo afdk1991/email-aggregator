@@ -1,6 +1,6 @@
 {
   "name": "email-aggregator",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "description": "邮箱聚合平台 Phase 0 PoC —— 单 IMAP 端到端闭环（TypeScript；demo/main 零外部依赖可运行，真实集成按需安装 pg/minio/kafkajs/undici）",

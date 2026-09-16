@@ -1,0 +1,30 @@
+{
+  "name": "email-aggregator-desktop",
+  "productName": "EmailAggregator",
+  "version": "0.0.0",
+  "private": true,
+  "description": "邮箱聚合平台 · 桌面端外壳（Electron）—— Windows / macOS / Linux 三平台 PC 安装包",
+  "author": {
+    "name": "afdk1991",
+    "email": "afdk1991@users.noreply.github.com"
+  },
+  "license": "UNLICENSED",
+  "main": "src/main.cjs",
+  "scripts": {
+    "icon": "node ../../scripts/make-icon.mjs --out build",
+    "prepare:assets": "node scripts/prepare.mjs",
+    "dev": "node scripts/prepare.mjs --skip-sidecar && electron .",
+    "_comment": "dist:* 一律走 scripts/build.mjs —— 它负责注入 MALLV_VERSION 环境变量（artifactName 宏依赖），直接调用 electron-builder 会让安装包文件名丢掉版本号。",
+    "pack": "node scripts/build.mjs --dir",
+    "dist": "node scripts/build.mjs",
+    "dist:win": "node scripts/build.mjs --win",
+    "dist:mac": "node scripts/build.mjs --mac",
+    "dist:linux": "node scripts/build.mjs --linux",
+    "dist:all": "node scripts/build.mjs --all",
+    "verify": "node scripts/verify-artifacts.mjs"
+  },
+  "devDependencies": {
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3"
+  }
+}

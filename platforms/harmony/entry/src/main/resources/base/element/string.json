@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "邮箱聚合平台主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "邮箱聚合平台"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "邮箱聚合平台"
+    },
+    {
+      "name": "reason_internet",
+      "value": "用于连接你的邮箱聚合服务端，收取与检索邮件"
+    }
+  ]
+}

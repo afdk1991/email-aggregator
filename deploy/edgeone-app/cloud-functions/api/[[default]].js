@@ -18,6 +18,8 @@
 // 且种子不再生成它们，保证删除后不会被重新播种。
 
 const DEFAULT_ACCOUNT = 'acc_demo'
+const APP_VERSION = 'MALLV0.0.0'
+const APP_VERSION_CODE = 0
 const STORE_NAME = 'mailbox'
 // v2：演示数据清理后启用新键，等同于把 Blob 里旧种子数据整体作废（无需手工删库）。
 const STATE_KEY = 'state.v2.json'
@@ -461,6 +463,9 @@ export async function onRequest({ request, env }) {
         ts: Date.now(),
         mode: `serverless-${mode}`,
         demo: demoEnabled,
+        // 与 Go 主干（src/version）保持同一版本号：多端部署按版本可追踪。
+        version: APP_VERSION,
+        versionCode: APP_VERSION_CODE,
         accounts: state.accounts.size,
         mails: state.mails.size,
       })

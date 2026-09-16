@@ -12,7 +12,7 @@
 services:
   email-aggregator:
     container_name: ea-p003-app
-    image: email-aggregator:p003
+    image: email-aggregator:p003-MALLV0.0.0
     build:
       # 构建上下文必须是仓库根（同时需要 email-aggregator-web 与 email-aggregator-go）
       context: ../..

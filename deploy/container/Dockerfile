@@ -12,6 +12,8 @@
 
 # ---------- 阶段 1：构建前端 ----------
 FROM node:22-alpine AS web
+LABEL org.opencontainers.image.version="MALLV0.0.0"
+LABEL org.opencontainers.image.revision="MALLV0.0.0"
 WORKDIR /web
 COPY email-aggregator-web/package.json email-aggregator-web/package-lock.json ./
 RUN npm ci --silent

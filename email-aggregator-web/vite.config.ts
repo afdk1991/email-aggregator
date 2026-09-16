@@ -11,12 +11,26 @@ import react from '@vitejs/plugin-react'
 // 通过 define 做构建期常量替换（而非运行期判断），
 // 关闭后相关分支会被 minifier 折叠、死代码被 tree-shaking 掉，
 // 生产产物里不会残留演示文案与演示接口调用。
-export default defineConfig(({ mode }) => {
+//
+// base 说明（多端部署的关键）：
+//   生产构建统一用**相对路径** base='./'，让同一份 dist 能落到五处目标：
+//     · Web 直访 / EdgeOne 静态站点 —— 页面在根路径，'./assets/x.js' 等价于 '/assets/x.js'
+//     · Go 单二进制（webui 标签）    —— 挂在根路径，同上
+//     · Electron 桌面端              —— 加载 127.0.0.1:<port>/index.html，相对路径成立
+//     · Capacitor 移动端             —— origin 为 https://localhost，相对路径成立
+//     · HarmonyOS Web 容器           —— 以 $rawfile('www/index.html') 加载。此处若用
+//                                      绝对路径 '/assets/x.js'，会解析到 rawfile 根目录
+//                                      而漏掉 www/ 一层，资源全部 404 —— 这是多端
+//                                       场景下最容易踩、又最难定位的一个坑。
+//   开发服务器仍用 '/'，避免 Vite dev 的 HMR 路径解析异常。
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiPort = env.VITE_API_PORT || '8090'
   const demoMode = env.VITE_DEMO_MODE !== 'false'
+  const isServe = command === 'serve'
 
   return {
+    base: isServe ? '/' : './',
     plugins: [react()],
     define: {
       __DEMO_MODE__: JSON.stringify(demoMode),
