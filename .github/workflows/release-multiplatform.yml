@@ -208,10 +208,22 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      # 必须是 JDK 21，不能是 17。
+      # Capacitor 8 的 android 库把编译级别定为 Java 21：
+      #   node_modules/@capacitor/android/capacitor/build.gradle:66-67
+      #     sourceCompatibility JavaVersion.VERSION_21
+      #     targetCompatibility JavaVersion.VERSION_21
+      # 用 JDK 17 时 Gradle 只抛一句没有版本上下文的
+      #   Execution failed for task ':capacitor-android:compileDebugJavaWithJavac'
+      #   > Java compilation initialization error
+      #       error: invalid source release: 21
+      # （实测 run 35120977342，BUILD FAILED in 45s），极易误判成 SDK 或 AGP 问题。
+      # AGP 8.13.0 本身要求 JDK 17+，21 满足；platforms/mobile/scripts/build.mjs
+      # 也加了 JDK 主版本预检，低于 21 直接给出可读错误。
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       # 不再使用 android-actions/setup-android@v3：它会把 runner 自带的
       # cmdline-tools 换成自己下载的 16.0，随后在 `sdkmanager --licenses` 里失败

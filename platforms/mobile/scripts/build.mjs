@@ -16,8 +16,10 @@
  *
  *  ──────────────────────────────────────────────────────────────────────────
  *  环境前置（本机不满足时本脚本会明确报错，不会静默产出一个空包）：
- *    Android：JDK 17+、Android SDK（ANDROID_HOME / ANDROID_SDK_ROOT）、
- *             首次还需 `sdkmanager "platforms;android-35" "build-tools;35.0.0"`
+ *    Android：**JDK 21+**（Capacitor 8 的 capacitor-android 把编译级别定为
+ *             Java 21，JDK 17 会报 `invalid source release: 21`）、
+ *             Android SDK（ANDROID_HOME / ANDROID_SDK_ROOT）、
+ *             首次还需 `sdkmanager "platforms;android-36" "build-tools;36.0.0"`
  *    iOS：    macOS + Xcode 15+（工程形态自动适配 SPM / CocoaPods）；Windows 上无法出包
  *  ──────────────────────────────────────────────────────────────────────────
  * ============================================================================
@@ -54,6 +56,27 @@ function resolveCapCli() {
   return path.join(path.dirname(pkgJson), bin)
 }
 
+/**
+ * 读取 JDK 主版本号；取不到返回 null。
+ *
+ * 先读 `$JAVA_HOME/release`（JDK 9+ 都有这个文件，`JAVA_VERSION="21.0.5"`），
+ * 这是最可靠的 —— 不依赖 PATH，也不会被 `java` 是别的版本骗到。
+ * 读不到再退回执行 `java -version` 解析（stderr）。
+ */
+function javaMajorVersion() {
+  const jh = process.env.JAVA_HOME
+  if (jh) {
+    const release = path.join(jh, 'release')
+    if (fs.existsSync(release)) {
+      const m = fs.readFileSync(release, 'utf8').match(/JAVA_VERSION="(\d+)/)
+      if (m) return Number(m[1])
+    }
+  }
+  const r = spawnSync('java', ['-version'], { encoding: 'utf8' })
+  const m = `${r.stdout ?? ''}${r.stderr ?? ''}`.match(/version "(\d+)/)
+  return m ? Number(m[1]) : null
+}
+
 const run = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { stdio: 'inherit', cwd: opts.cwd ?? PKG_DIR, env: { ...process.env, ...opts.env } })
   if (r.error) throw new Error(`无法执行 ${cmd}：${r.error.message}`)
@@ -69,8 +92,32 @@ function buildAndroid() {
   if (!process.env.ANDROID_HOME && !process.env.ANDROID_SDK_ROOT) {
     throw new Error(
       '未检测到 Android SDK（ANDROID_HOME / ANDROID_SDK_ROOT 均未设置）。\n' +
-        '  Android 出包需要：JDK 17+ 与 Android SDK（含 platforms;android-35、build-tools;35.0.0）。',
+        '  Android 出包需要：JDK 21+ 与 Android SDK（含 platforms;android-36、build-tools;36.0.0）。',
     )
+  }
+
+  //  JDK 主版本预检。Capacitor 8 的 android 库把编译级别定死在 Java 21
+  //  （node_modules/@capacitor/android/capacitor/build.gradle:66-67 →
+  //   JavaVersion.VERSION_21）。用 JDK 17 编译时 Gradle 只会给出一句
+  //     Execution failed for task ':capacitor-android:compileDebugJavaWithJavac'
+  //     > Java compilation initialization error
+  //         error: invalid source release: 21
+  //  既没有版本上下文、也不提示"去升级 JDK"，排查成本很高（实测 run 35120977342）。
+  //  这里提前拦住，把"缺什么、怎么补"直接写进错误里。
+  const javaMajor = javaMajorVersion()
+  if (javaMajor !== null && javaMajor < 21) {
+    throw new Error(
+      `Android 出包需要 JDK 21+，当前 JDK 主版本为 ${javaMajor}。\n` +
+        '  原因：Capacitor 8 的 capacitor-android 模块要求 sourceCompatibility = Java 21。\n' +
+        '  修正：安装 Temurin 21 并把 JAVA_HOME 指向它；\n' +
+        '       CI（.github/workflows/release-multiplatform.yml 的 android job）' +
+        '对应 actions/setup-java 的 java-version: \'21\'。',
+    )
+  }
+  if (javaMajor === null) {
+    console.log('[mobile] 警告：无法判定 JDK 主版本（未读到 $JAVA_HOME/release，且 java 不可执行）；跳过预检')
+  } else {
+    console.log(`[mobile] JDK 主版本 = ${javaMajor}（Capacitor 8 要求 ≥ 21）`)
   }
 
   run(process.execPath, [resolveCapCli(), 'sync', 'android'])
