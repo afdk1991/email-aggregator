@@ -17,7 +17,7 @@
  *  环境前置（本机不满足时本脚本会明确报错，不会静默产出一个空包）：
  *    Android：JDK 17+、Android SDK（ANDROID_HOME / ANDROID_SDK_ROOT）、
  *             首次还需 `sdkmanager "platforms;android-35" "build-tools;35.0.0"`
- *    iOS：    macOS + Xcode 15+ + CocoaPods；Windows 上无法构建 .ipa
+ *    iOS：    macOS + Xcode 15+（工程形态自动适配 SPM / CocoaPods）；Windows 上无法出包
  *  ──────────────────────────────────────────────────────────────────────────
  * ============================================================================
  */
@@ -107,14 +107,36 @@ function buildIOS() {
 
   run(process.execPath, [resolveCapCli(), 'sync', 'ios'])
 
-  const workspace = fs
-    .readdirSync(path.join(iosDir, 'App'))
-    .find((n) => n.endsWith('.xcworkspace') || n.endsWith('.xcodeproj'))
-  if (!workspace) throw new Error('未找到 Xcode 工程/工作区')
+  // ---------------------------------------------------------------------------
+  //  工程形态自适应（Capacitor 8 起默认走 SPM，两者参数不同）
+  //  ---------------------------------------------------------------------------
+  //  @capacitor/cli 的 config.js 里 iosPlatformTemplateArchive 默认值是
+  //  'ios-spm-template.tar.gz'；只有 `cap add ios --packagemanager CocoaPods`
+  //  才会切成 'ios-pods-template.tar.gz'。实测两个模板的顶层结构：
+  //    SPM  → App/App.xcodeproj + App/CapApp-SPM/Package.swift   （无顶层 xcworkspace）
+  //    Pods → App/App.xcodeproj + App/App.xcworkspace + App/Podfile
+  //  因此不能硬编码 -workspace：把 .xcodeproj 传给 -workspace 时 xcodebuild 会
+  //  直接报 "<path> is not a workspace"，而指向不存在的 App.xcworkspace 则是
+  //  "does not exist"。按实际存在的形态选参数才是稳的。
+  const appDir = path.join(iosDir, 'App')
+  const entries = fs.readdirSync(appDir)
+  const wsName = entries.find((n) => n.endsWith('.xcworkspace'))
+  const projName = entries.find((n) => n.endsWith('.xcodeproj'))
+  const targetArgs = wsName
+    ? ['-workspace', path.join(appDir, wsName)]
+    : projName
+      ? ['-project', path.join(appDir, projName)]
+      : null
+  if (!targetArgs) {
+    throw new Error(
+      `未找到 Xcode 工程/工作区（${appDir} 下既无 .xcworkspace 也无 .xcodeproj）。\n` +
+        '  请先执行：npm run add:ios',
+    )
+  }
+  console.log(`[mobile] 工程形态：${wsName ? 'CocoaPods 工作区' : 'SPM 工程'}（${wsName ?? projName}）`)
 
   const args = [
-    '-workspace',
-    path.join(iosDir, 'App', workspace),
+    ...targetArgs,
     '-scheme',
     'App',
     '-configuration',

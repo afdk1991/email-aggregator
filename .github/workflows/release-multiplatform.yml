@@ -212,6 +212,13 @@ jobs:
         working-directory: platforms/mobile
         run: npm ci || npm install
 
+      # 必须先让 Capacitor 的 webDir（platforms/mobile/www）就位，再执行 cap add。
+      # 否则 `cap add` 会走 "sync could not run--missing www directory" 分支：
+      # 原生工程虽被建出来，但插件注入与 local.properties 生成全被跳过，
+      # 工程处于半初始化状态（后续只能靠 build.mjs 里的 cap sync 补救）。
+      - name: 准备前端产物（五处同步，含 Capacitor webDir=www）
+        run: node scripts/sync-web-assets.mjs
+
       - name: 生成 Android 原生工程
         working-directory: platforms/mobile
         run: npx cap add android
@@ -262,6 +269,10 @@ jobs:
         working-directory: platforms/mobile
         run: npm ci || npm install
 
+      # 同 Android：cap add 之前 webDir 必须就位，否则依赖注入被静默跳过。
+      - name: 准备前端产物（五处同步，含 Capacitor webDir=www）
+        run: node scripts/sync-web-assets.mjs
+
       - name: 生成 iOS 原生工程
         working-directory: platforms/mobile
         run: npx cap add ios
@@ -271,20 +282,22 @@ jobs:
           node scripts/version.mjs sync
           node scripts/version.mjs verify
 
+      # 刻意不再手写 xcodebuild —— 直接复用 platforms/mobile/scripts/build.mjs。
+      # 原先的裸 xcodebuild 有三处硬缺陷（静态审计发现，均为必挂）：
+      #   ① 缺少 prepare 步骤 → www 从未灌进原生工程，归档出来是个没有 Web 资源的空壳；
+      #   ② 从不执行 `cap sync ios` → 依赖从未解析（CocoaPods 的 pod install 或
+      #      SPM 的包解析），编译期必然缺 Capacitor 模块；
+      #   ③ 硬编码 -workspace App.xcworkspace。Capacitor 8 起默认用 SPM 模板
+      #      （config.js: iosPlatformTemplateArchive = 'ios-spm-template.tar.gz'），
+      #      只生成 App/App.xcodeproj，根本没有顶层 App.xcworkspace。
+      # build.mjs 会做 prepare + cap sync，并按实际形态选 -workspace / -project。
       - name: 归档（未签名）
         working-directory: platforms/mobile
         env:
           CODE_SIGNING_ALLOWED: 'NO'
           CODE_SIGNING_REQUIRED: 'NO'
           CODE_SIGN_IDENTITY: ''
-        run: |
-          set -euo pipefail
-          cd ios/App
-          xcodebuild -workspace App.xcworkspace -scheme App \
-            -configuration Release -sdk iphoneos \
-            -archivePath "$PWD/build/App.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            archive
+        run: node scripts/build.mjs ios
 
       - name: 校验产物版本号
         working-directory: platforms/mobile
@@ -293,7 +306,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ios-${{ needs.version-guard.outputs.canonical }}
-          path: platforms/mobile/ios/App/build/App.xcarchive
+          # 路径必须与 scripts/build.mjs 的 -archivePath 一致：
+          # build.mjs 归档到 <mobile>/ios/build/App.xcarchive。原先写的
+          # ios/App/build/... 是脚本从不产出的位置，配合 if-no-files-found: error
+          # 会让 iOS job 在归档成功之后再失败一次。
+          path: platforms/mobile/ios/build/App.xcarchive
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -323,7 +340,7 @@ jobs:
             echo ""
             echo "### 产物"
             echo ""
-            find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.apk' -o -name '*.aab' \) \
+            find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.apk' -o -name '*.aab' -o -name '*.hap' \) \
               | sort | sed 's|^dist/|  - \`|; s|$|\`|'
             echo ""
             echo "### 构建说明"
@@ -333,7 +350,7 @@ jobs:
             echo "- Linux：AppImage + deb + rpm"
             echo "- Android：debug APK（可直装）；Release 需配置签名 keystore"
             echo "- iOS：未签名 xcarchive；产出 .ipa 需 Apple 开发者证书"
-            echo "- HarmonyOS：需 DevEco Studio，请在本地或自建 runner 上执行"
+            echo "- HarmonyOS：HAP（需 DevEco Studio，自建 runner 的启用方式见工作流文末）"
           } > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
@@ -345,19 +362,72 @@ jobs:
           draft: false
           prerelease: false
 
+  # ─────────────────────────────────────────────────────────────────────────
+  #  ⑥ HarmonyOS（HAP）—— 默认跳过，需自建 runner
+  #
+  #  DevEco Studio（hvigor / ohpm / HarmonyOS SDK）无法在 GitHub 托管 runner 上
+  #  合法获取与安装，因此本 job 用 `runs-on: [self-hosted, harmony]`。
+  #
+  #  启用方式（两步，缺第二步 job 会一直排队等一个不存在的 runner）：
+  #    1. 在装有 DevEco Studio 5.0+ 的机器上注册 self-hosted runner，额外打
+  #       `harmony` 标签，并确保 DEVECO_SDK_HOME 已进入 runner 的环境变量；
+  #    2. 仓库 Settings → Secrets and variables → Actions → Variables
+  #       新建变量 HARMONY_RUNNER = true。
+  #  未设置该变量时本 job 立即 skipped，不占用 runner 队列，也不影响 release。
+  #
+  #  刻意不把本 job 放进 release 的 needs：HAP 属可选产物，缺席不应阻断其余五端
+  #  的发布；而 download-artifact 会自然把它的产物一并收进 Release。
+  # ─────────────────────────────────────────────────────────────────────────
+  harmony:
+    needs: version-guard
+    if: vars.HARMONY_RUNNER == 'true'
+    runs-on: [self-hosted, harmony]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 构建前端 SPA
+        working-directory: email-aggregator-web
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - name: 准备前端产物（五处同步，含 harmony rawfile/www）
+        run: node scripts/sync-web-assets.mjs
+
+      - name: 下发版本号到鸿蒙工程
+        run: |
+          node scripts/version.mjs sync
+          node scripts/version.mjs verify
+
+      # 不再单独调 prepare.mjs：scripts/build.mjs 内部已经先跑 prepare()
+      # （版本门禁 + 同步 rawfile/www + 生成图标），再调 hvigorw assembleHap。
+      - name: 构建 HAP
+        working-directory: platforms/harmony
+        run: node scripts/build.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harmony-${{ needs.version-guard.outputs.canonical }}
+          # 与 scripts/build.mjs 的产物扫描根一致（entry/build/**），
+          # 典型落点：entry/build/default/outputs/default/entry-default-signed.hap
+          path: platforms/harmony/entry/build/**/*.hap
+          if-no-files-found: error
+
 # ============================================================================
-#  HarmonyOS 说明
+#  HarmonyOS 补充说明
 #
-#  DevEco Studio（含 hvigor / ohpm / HarmonyOS SDK）无法在 GitHub 托管 runner 上
-#  合法获取与安装，因此 HAP 不在本工作流内构建。可行路径有二：
-#    1. 本地用 DevEco Studio 打开 platforms/harmony，执行 Build > Build Hap(s)；
-#       或命令行（需先设置 DEVECO_SDK_HOME）：
-#           node scripts/version.mjs sync
-#           cd platforms/harmony && node scripts/prepare.mjs
-#           node scripts/build.mjs
-#    2. 自建 runner（Windows/macOS 均可）安装 DevEco Studio，再添加一个
-#       runs-on: [self-hosted, harmony] 的 job 复用同样的命令。
+#  ① 本工作流内的 harmony job 默认关闭（见上文注释的启用方式）。
 #
-#  注意：安装到真机需要签名。请在 AppScope/build-profile.json5 的 signingConfigs
-#  中填入自己的签名配置（.p12 + .cer + profile），并把私钥与密码放在 CI Secret 里。
+#  ② 也可以完全脱离 CI，在本地用 DevEco Studio 打开 platforms/harmony，
+#     执行 Build > Build Hap(s)；或命令行（需先设置 DEVECO_SDK_HOME）：
+#         node scripts/version.mjs sync
+#         node scripts/sync-web-assets.mjs
+#         cd platforms/harmony && node scripts/build.mjs
+#
+#  ③ 安装到真机需要签名。请在 AppScope/build-profile.json5 的 signingConfigs
+#     中填入自己的签名配置（.p12 + .cer + profile），私钥与密码放 CI Secret。
 # ============================================================================
