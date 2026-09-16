@@ -132,6 +132,14 @@ if ($Integration) {
         $env:OPENSEARCH_PASS = 'Kp3mQ9@vL2*rT7xA8'
         $env:KAFKA_BROKERS = '127.0.0.1:9092'
         $env:KAFKAJS_NO_PARTITIONER_WARNING = '1'
+
+        # 环境预置：PG 迁移 + MinIO 建桶。
+        # 与远端 CI 走**同一个脚本**，确保本机与 CI 看到相同的 schema 与桶。
+        # 此前本机与远端都缺这一步，于是集成测试必然双 FAIL
+        # （relation "mail_metadata" does not exist / bucket does not exist）。
+        & $node scripts/bootstrap-integration.mjs 2>&1 | Tee-Object -FilePath (Join-Path $LogDir 'ts-integ-bootstrap.log') | Select-Object -Last 14
+        if ($LASTEXITCODE -eq 0) { Ok '集成环境预置（PG 迁移 + MinIO 建桶）PASS' } else { Bad "集成环境预置失败 RC=$LASTEXITCODE" }
+
         & $node --experimental-strip-types tests/integration_real_e2e.ts 2>&1 | Tee-Object -FilePath (Join-Path $LogDir 'ts-integ-real.log') | Select-Object -Last 8
         if ($LASTEXITCODE -eq 0) { Ok 'TS 集成层真实联调 PASS' } else { Bad "TS 集成层真实联调失败 RC=$LASTEXITCODE" }
     } finally { Pop-Location }

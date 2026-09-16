@@ -165,6 +165,26 @@ edgeone makers env set AI_THIRD_PARTY_KEY "sk-xxx"
 | `deploy/container/Dockerfile` | 容器化完整功能版镜像（含 WebSocket + 内嵌 SPA） |
 | `render.yaml` | Render Blueprint，免费层一键部署容器版 |
 | `.dockerignore` | 裁剪构建上下文，排除缓存与密钥 |
+
+### 6.1 GitHub Actions 前置条件（缺一即失败）
+
+| 项 | 要求 | 缺失时的表现 |
+|----|------|-------------|
+| Secret `EDGEONE_PAGES_API_TOKEN` | 仓库 → Settings → Secrets and variables → Actions | `deploy-official` 在**「预检」步骤**明确失败并跳过发布，Step Summary 给出配置路径（不会让发布器跑到一半抛晦涩错误） |
+| 工作流权限 | `deploy-edgeone.yml` 用 `contents: read`；`release-multiplatform.yml` 用 `contents: write`（挂 Release） | 已内置，无需手工设置 |
+| 自建 runner（仅鸿蒙） | `runs-on: [self-hosted, harmony]` + DevEco Studio | 鸿蒙 HAP 不在托管流水线内，见 `release-multiplatform.yml` 文末说明 |
+
+> ⚠️ **`EDGEONE_PAGES_API_TOKEN` 目前尚未配置**（2026-09-16 核对 `gh secret list` 为空），
+> 故 push 到 master 时 `deploy-official` 会停在预检处。这是**预期行为**：宁可显式失败，
+> 也不让线上版本悄悄停在旧值。**本地发布不受影响**（走 EdgeOne CLI 登录态）。
+
+### 6.2 远端 CI 状态（2026-09-16 首次核对）
+
+| 项 | 状态 |
+|----|------|
+| `CI` 工作流 | 2026-09-12 起连续失败；根因是 **MinIO 已从 Docker Hub 下架**（`minio/minio` → `repository does not exist`），已修复：改用 `quay.io/minio/minio` 并**固定 RELEASE 版本** |
+| 本地 `ci.ps1` | 全绿 —— 差别在于**本地不跑 `integration` job**，故长期掩盖了上述问题 |
+| 本机网络 | **无法直连 Docker Hub**（curl 返回 HTTP 000），镜像可用性只能查 quay.io 等其它源求证 |
 | `部署与发布流程规范.md` | **流程规范总纲**（环节 / 触发 / 配置 / 对应关系与约束） |
 
 ---

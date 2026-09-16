@@ -6,7 +6,8 @@
 #   - Go   ：go build / go vet / go test / go build -tags integration
 #   - TS   ：demo + 单测 + tsc --noEmit（Node 22，--experimental-strip-types）
 #   - Web  ：tsc + vite build
-#   - 集成 ：service 容器拉真实 PG / MinIO / OpenSearch / Kafka 跑端到端
+#   - 集成 ：service 容器拉真实 PG / MinIO / OpenSearch / Kafka，
+#            并先重放迁移 + 预建桶（scripts/bootstrap-integration.mjs）再跑端到端
 # ============================================================
 name: CI
 
@@ -52,6 +53,7 @@ jobs:
           node --check scripts/version.mjs
           node --check scripts/sync-web-assets.mjs
           node --check scripts/make-icon.mjs
+          node --check email-aggregator/scripts/bootstrap-integration.mjs
           node --check platforms/desktop/scripts/prepare.mjs
           node --check platforms/desktop/scripts/build.mjs
           node --check platforms/desktop/scripts/verify-artifacts.mjs
@@ -150,6 +152,21 @@ jobs:
   integration:
     name: 真实中间件集成（PG/MinIO/OpenSearch/Kafka）
     runs-on: ubuntu-latest
+    # 集成栈连接参数集中在 **job 级**：预置步骤与测试步骤必须看到同一组值。
+    # 此前参数只写在 TS 测试步骤上，导致"环境预置"这一步根本不存在，
+    # 于是测试必然双 FAIL（relation mail_metadata / bucket 不存在）。
+    env:
+      PG_DSN: postgres://agg:agg-secret@127.0.0.1:15432/mailagg
+      MINIO_ENDPOINT: 127.0.0.1:9000
+      MINIO_BUCKET: agg-mail
+      MINIO_ACCESS_KEY: agg
+      MINIO_SECRET_KEY: agg-secret
+      MINIO_SECURE: "false"
+      OPENSEARCH_ADDR: https://127.0.0.1:9200
+      OPENSEARCH_USER: admin
+      OPENSEARCH_PASS: Admin123!Strong
+      KAFKA_BROKERS: 127.0.0.1:9092
+      KAFKAJS_NO_PARTITIONER_WARNING: "1"
     services:
       postgres:
         image: postgres:16
@@ -236,22 +253,17 @@ jobs:
           echo "::error::MinIO 未在 80 秒内就绪。请确认 quay.io/minio/minio 镜像可拉取，且 9000 端口已映射。"
           exit 1
 
+      # 容器起来 ≠ schema 就绪 —— 先重放 PG 迁移 + 预建 MinIO 桶。
+      # 与 deploy/bootstrap.sh 的第 2、3 步等价，但**不需要 Docker**（直接用 pg / minio 客户端），
+      # 故本地无 Docker 也能跑，且与生产 bootstrap 走同一批迁移文件。
+      - name: 预置集成环境（PG 迁移 + MinIO 建桶）
+        working-directory: email-aggregator
+        run: node scripts/bootstrap-integration.mjs
+
       - name: Go 集成测试（真实 Kafka e2e：roundtrip/DLQ/幂等消费）
         working-directory: email-aggregator-go
         run: go test -tags integration ./src/integration/...
 
       - name: TS 集成层真实联调（PG/MinIO/OpenSearch/Kafka）
         working-directory: email-aggregator
-        env:
-          PG_DSN: postgres://agg:agg-secret@127.0.0.1:15432/mailagg
-          MINIO_ENDPOINT: 127.0.0.1:9000
-          MINIO_BUCKET: agg-mail
-          MINIO_ACCESS_KEY: agg
-          MINIO_SECRET_KEY: agg-secret
-          MINIO_SECURE: "false"
-          OPENSEARCH_ADDR: https://127.0.0.1:9200
-          OPENSEARCH_USER: admin
-          OPENSEARCH_PASS: Admin123!Strong
-          KAFKA_BROKERS: 127.0.0.1:9092
-          KAFKAJS_NO_PARTITIONER_WARNING: "1"
         run: npx --yes tsx tests/integration_real_e2e.ts
