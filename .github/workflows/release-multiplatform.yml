@@ -83,13 +83,26 @@ jobs:
           fi
           echo "标签与版本号一致：$TAG"
 
-      - name: 校验 SQL/前端产物同步脚本本身可运行
+      - name: 校验版本相关脚本本身可运行
         run: |
           set -euo pipefail
           # 没有 dist 时脚本会以明确错误退出（此处只验证它能被解析执行）
           node --check scripts/version.mjs
           node --check scripts/sync-web-assets.mjs
           node --check scripts/make-icon.mjs
+          node --check platforms/mobile/scripts/zip-search.mjs
+          node --check platforms/mobile/scripts/plist.mjs
+          node --check platforms/mobile/scripts/verify-artifacts.mjs
+
+          # 移动端产物校验的回归自测。
+          # 守的是两个**静默假阴性**陷阱：① APK/AAB/IPA 都是 ZIP，文本条目默认
+          # deflate 压缩，对文件原文 includes('MALLVx.y.z') 必为 false；
+          # ② Xcode 把 Info.plist 重序列化成二进制 plist，文本正则匹配不到
+          # <key>CFBundleVersion</key>。两者的症状都是"包明明打对了却报未检出版本号"，
+          # 且都不会抛异常，靠读代码很难发现 —— 必须用夹具钉死。
+          # 自测自带夹具（纯 Node 现造 ZIP + 内嵌 base64 的 bplist），
+          # 不依赖任何构建产物，也不会碰到 android/ ios/ 脚手架目录。
+          node platforms/mobile/scripts/selftest.mjs
 
   # ─────────────────────────────────────────────────────────────────────────
   #  ② 桌面端 PC 安装包（Windows / macOS / Linux）
