@@ -58,6 +58,16 @@ jobs:
           node --check platforms/desktop/scripts/build.mjs
           node --check platforms/desktop/scripts/verify-artifacts.mjs
           node --check platforms/mobile/scripts/prepare.mjs
+          node --check platforms/mobile/scripts/zip-search.mjs
+          node --check platforms/mobile/scripts/plist.mjs
+          node --check platforms/mobile/scripts/verify-artifacts.mjs
+          node --check scripts/release-preflight.mjs
+
+          # 两处**静默假阴性**的回归自测（APK 是 ZIP 会压缩、xcarchive 的 Info.plist
+          # 是二进制 plist），以及 Release 附件预检的自测（目录束/重名/伪 ZIP/超限）。
+          # 三者都自带夹具，不依赖任何构建产物。
+          node platforms/mobile/scripts/selftest.mjs
+          node scripts/release-preflight.mjs --selftest
           node --check platforms/mobile/scripts/build.mjs
           node --check platforms/mobile/scripts/verify-artifacts.mjs
           node --check platforms/harmony/scripts/prepare.mjs

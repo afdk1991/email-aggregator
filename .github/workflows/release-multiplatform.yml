@@ -3,7 +3,7 @@
 #
 #  触发：
 #    · 推送 MALLV* 形式的标签（如 MALLV0.0.1）→ 构建并在 GitHub Release 挂载全部产物
-#    · 手动 workflow_dispatch
+#    · 手动 workflow_dispatch（可勾选 dry_run 空跑 release job，不创建公开 Release）
 #
 #  版本号来源：仓库根 version.json（唯一权威源）。
 #  所有产物文件名都带规范版本号（MALLVx.y.z），并附 verify-artifacts 内容级校验。
@@ -12,6 +12,12 @@
 #     Windows 安装包 → windows runner    macOS dmg → macos runner
 #     Linux AppImage → ubuntu runner     iOS ipa   → macos runner
 #     HarmonyOS hap  → 需 DevEco Studio，GitHub 托管 runner 不具备（见文末说明）
+#
+#  ⚠️ 本仓库是 PUBLIC：Release 一创建就对全网可见，失败来不及撤回。
+#     因此 ⑤ release job 在挂载附件前会跑 scripts/release-preflight.mjs 做硬门禁
+#     （残留目录束 / 附件重名 / 伪 ZIP / 0 字节 / 数量体积上限 / 覆盖面）。
+#     凡改动发布链路，先 `gh workflow run release-multiplatform.yml -f dry_run=true`
+#     空跑一遍，全绿再打标签。
 # ============================================================================
 
 name: release-multiplatform
@@ -26,6 +32,11 @@ on:
         description: 手动触发原因（仅用于审计）
         required: false
         type: string
+      dry_run:
+        description: 空跑 Release 汇总（完整执行附件预检与说明生成，但不创建公开 Release）
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -93,6 +104,7 @@ jobs:
           node --check platforms/mobile/scripts/zip-search.mjs
           node --check platforms/mobile/scripts/plist.mjs
           node --check platforms/mobile/scripts/verify-artifacts.mjs
+          node --check scripts/release-preflight.mjs
 
           # 移动端产物校验的回归自测。
           # 守的是两个**静默假阴性**陷阱：① APK/AAB/IPA 都是 ZIP，文本条目默认
@@ -103,6 +115,12 @@ jobs:
           # 自测自带夹具（纯 Node 现造 ZIP + 内嵌 base64 的 bplist），
           # 不依赖任何构建产物，也不会碰到 android/ ios/ 脚手架目录。
           node platforms/mobile/scripts/selftest.mjs
+
+          # Release 附件预检的自测。守的是 release job 的四类"发出来才发现"的情形：
+          # 残留目录束（xcarchive 被拆成几百个附件）、附件重名（静默覆盖）、
+          # 伪 ZIP（打包只写出半个文件）、0 字节/超限。夹具在临时目录现造，
+          # 不依赖任何构建产物。
+          node scripts/release-preflight.mjs --selftest
 
   # ─────────────────────────────────────────────────────────────────────────
   #  ② 桌面端 PC 安装包（Windows / macOS / Linux）
@@ -379,62 +397,125 @@ jobs:
         working-directory: platforms/mobile
         run: node scripts/verify-artifacts.mjs
 
+      # 归档是**目录束**，绝不能直接当 Release 附件。
+      # actions/upload-artifact 会原样保留整棵树，下游 `files: dist/**` 就会把归档
+      # 内部的**每一个**文件（dSYMs、.swiftmodule、framework 分片…）拆成几百个
+      # 独立附件 —— 归档本身反而装不回 Xcode，且失败时 Release 已经建出来了。
+      # 在 macOS 上用原生 ditto 压成单文件：这是 Apple 对 xcarchive 的推荐打包方式，
+      # 能保留符号链接与扩展属性（普通 zip 会丢符号链接，framework 就废了）。
+      - name: 打包归档为单文件
+        working-directory: platforms/mobile/ios/build
+        run: |
+          set -euo pipefail
+          rm -f App.xcarchive.zip
+          if command -v ditto >/dev/null 2>&1; then
+            ditto -c -k --sequesterRsrc --keepParent App.xcarchive App.xcarchive.zip
+          else
+            zip -qry -y App.xcarchive.zip App.xcarchive
+          fi
+          ls -lh App.xcarchive.zip
+          # 立刻自证不是空壳：结构完整（unzip -t 校验每个条目）且含 Info.plist。
+          # 注意先落文件再 grep —— `unzip -l | grep -q` 会在 grep 提前退出时让 unzip
+          # 吃到 SIGPIPE，配合 set -o pipefail 反而把这一步判成失败。
+          unzip -tq App.xcarchive.zip
+          unzip -l App.xcarchive.zip > "$RUNNER_TEMP/p003-xcalist.txt"
+          grep -q 'App\.xcarchive/Info\.plist' "$RUNNER_TEMP/p003-xcalist.txt"
+          echo "归档条目数：$(grep -c 'App\.xcarchive/' "$RUNNER_TEMP/p003-xcalist.txt")"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ios-${{ needs.version-guard.outputs.canonical }}
-          # 路径必须与 scripts/build.mjs 的 -archivePath 一致：
-          # build.mjs 归档到 <mobile>/ios/build/App.xcarchive。原先写的
-          # ios/App/build/... 是脚本从不产出的位置，配合 if-no-files-found: error
-          # 会让 iOS job 在归档成功之后再失败一次。
-          path: platforms/mobile/ios/build/App.xcarchive
+          # 只上传 .zip 单文件。原始目录束留在 runner 上即可 —— zip 里是同样的内容，
+          # 本地解压后就是一个完整可用的 .xcarchive。
+          path: platforms/mobile/ios/build/App.xcarchive.zip
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────
   #  ⑤ 汇总发布
+  #
+  #  打 MALLV* 标签时真实发版；workflow_dispatch 且勾选 dry_run 时**空跑**：
+  #  完整走一遍"下载产物 → 附件预检 → 生成说明"，只跳过最后那一次创建 Release。
+  #
+  #  为什么要有 dry_run：本仓库是 PUBLIC，Release 一创建就对全网可见，附件传错
+  #  来不及撤回。这一层让"从未运行过的发布链路"能在零公开副作用的前提下先验证。
+  #
+  #  发布前硬门禁：scripts/release-preflight.mjs。它挡掉四类"发出来才发现"的情形
+  #  （残留目录束 / 附件重名 / 伪 ZIP / 0 字节与超限），失败即禁止创建 Release。
   # ─────────────────────────────────────────────────────────────────────────
   release:
     needs: [version-guard, desktop, android, ios]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - uses: actions/download-artifact@v4
         with:
           path: dist
 
-      - name: 整理产物清单
+      - name: 下载到的原始产物
         run: |
           set -euo pipefail
-          find dist -type f | sort | sed 's/^/  /'
+          echo "dist 下文件总数（含目录束内部）：$(find dist -type f | wc -l)"
+          du -sh dist
+
+      - name: 附件预检（残留目录束 / 重名 / 伪 ZIP / 数量体积上限）
+        id: pre
+        run: node scripts/release-preflight.mjs --dist dist --flat dist/_assets --manifest dist/ASSETS.txt
+
+      - name: 生成 Release 说明
+        run: |
+          set -euo pipefail
           {
             echo "## 邮箱聚合平台 ${{ needs.version-guard.outputs.canonical }}"
             echo ""
-            echo "- 规范版本号：\`${{ needs.version-guard.outputs.canonical }}\`"
-            echo "- 平台合规号：\`${{ needs.version-guard.outputs.semver }}\`"
-            echo "- 单调整数码：\`${{ needs.version-guard.outputs.code }}\`"
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 规范版本号 | \`${{ needs.version-guard.outputs.canonical }}\` |"
+            echo "| 平台合规号 | \`${{ needs.version-guard.outputs.semver }}\` |"
+            echo "| 单调整数码 | \`${{ needs.version-guard.outputs.code }}\` |"
             echo ""
-            echo "### 产物"
+            echo "### 附件（$(wc -l < dist/ASSETS.txt | tr -d ' ') 个）"
             echo ""
-            find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.apk' -o -name '*.aab' -o -name '*.hap' \) \
-              | sort | sed 's|^dist/|  - \`|; s|$|\`|'
+            # 说明里的附件清单直接由预检产出的清单生成，与真正上传的那批文件严格同源，
+            # 不会出现"说明里写了、实际没传"的漂移。
+            awk -F/ '{ printf "  - `%s`\n", $NF }' dist/ASSETS.txt
             echo ""
             echo "### 构建说明"
             echo ""
-            echo "- Windows：NSIS 安装包 + 免安装便携版"
+            echo "- Windows：NSIS 安装包（x64 / arm64）+ 免安装便携版（x64）"
             echo "- macOS：dmg + zip（x64 / arm64），未签名"
-            echo "- Linux：AppImage + deb + rpm"
+            echo "- Linux：AppImage + deb + rpm；另附 Go 主干单二进制（5 个目标平台）"
             echo "- Android：debug APK（可直装）；Release 需配置签名 keystore"
-            echo "- iOS：未签名 xcarchive；产出 .ipa 需 Apple 开发者证书"
+            echo "- iOS：未签名 xcarchive（已用 ditto 打包为单文件 .zip）；产出 .ipa 需 Apple 开发者证书"
             echo "- HarmonyOS：HAP（需 DevEco Studio，自建 runner 的启用方式见工作流文末）"
+            echo ""
+            echo "> 附件清单由 \`scripts/release-preflight.mjs\` 预检产出：已校验无残留目录束、"
+            echo "> 无重名、ZIP 结构完整、数量与体积均在上限内。"
           } > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
+      - name: 空跑模式（不创建 Release）
+        if: ${{ github.event_name != 'push' }}
+        run: |
+          echo "::notice::dry_run 完成：附件预检与说明生成均已真实执行，但未创建公开 Release。"
+          echo "真实发版请推送 MALLV* 标签（会先经过同一道预检门禁）。"
+          echo "本次将上传的附件数：${{ steps.pre.outputs.count }}"
+
       - uses: softprops/action-gh-release@v2
+        # 只有标签 push 才真正创建 Release。workflow_dispatch（含带 --ref 指向标签的
+        # 手动触发）一律不创建，避免"手动点一下就把公开 Release 发出去"。
+        if: ${{ github.event_name == 'push' }}
         with:
           name: 邮箱聚合平台 ${{ needs.version-guard.outputs.canonical }}
           body_path: RELEASE_NOTES.md
-          files: dist/**/*
+          # 用一级通配而非 dist/**：扁平目录里只有文件（预检已断言无子目录、无重名），
+          # 于是无论 action 是否过滤目录都不会误传目录束内容。
+          files: dist/_assets/*
           draft: false
           prerelease: false
 
