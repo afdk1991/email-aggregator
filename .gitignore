@@ -1,74 +1,86 @@
-# ============================================================
-# 项目003 · 邮箱聚合平台 —— 根 .gitignore
-# 策略：忽略构建缓存 / 产物 / 密钥 / 运行时状态；保留源码、文档、示例配置。
-# ============================================================
+﻿# ============================================================================
+#  项目003 — 邮箱聚合平台（Go 主干 + React 前端 + Electron/鸿蒙/移动端）忽略规则
+#
+#  ⚠️ 曾误入库 23445 个文件，主要是 .gopath / .gocache 两处 Go 模块与构建缓存
+#     （含 42 MB 的 vmlinux 测试数据、多个 37 MB 的依赖 zip、若干 .exe 测试件）。
+#     本文件必须同时覆盖【顶层】与【email-aggregator-go/ 内嵌套】两份同名缓存。
+# ============================================================================
 
-# ---------- Go 工具链缓存（约 850MB，勿入库） ----------
-.gocache/
-.gopath/
-**/.gocache/
-**/.gopath/
-
-# ---------- Go 构建产物 ----------
-*.exe
-email-agg-server
-**/bin/
-**/release/
-**/webroot/dist/
-*.log
-integ_run*.log
-integ-server.err.log
-integ-webui.err.log
-integ-webui.log
-
-# ---------- Node / 前端 ----------
+# ===== 依赖 =====
 node_modules/
-dist/
-*.local
-.DS_Store
+**/node_modules/
 
-# ---------- 密钥与本地配置（保留 .env.example） ----------
+# ===== Go 模块缓存与构建缓存（严禁入库）=====
+.gopath/
+.gocache/
+**/.gopath/
+**/.gocache/
+**/vendor/
+bin/
+**/bin/*.exe
+**/bin/*.exe~
+
+# ===== 环境与部署凭据（绝不入库）=====
 .env
+.env.local
+.env.*.local
 **/.env
-# 带后缀的 env 文件同样属于密钥范畴 —— 原先只写 `.env` 精确匹配，
-# 导致 `.env.keycloak-prod`（含 KC_ADMIN_PASSWORD / KC_DB_PASSWORD / OIDC_CLIENT_SECRET）未被忽略。
-**/.env.*
+**/.env.production
+**/.env.keycloak
+**/.env.keycloak-prod
 !**/.env.example
-# 例外：前端 .env.production 只含构建期开关 VITE_DEMO_MODE，不含任何凭据，且**必须入库**——
-# 它缺失会让 vite.config.ts 的 `VITE_DEMO_MODE !== 'false'` 退回 true，产出带演示模式的生产包。
-!email-aggregator-web/.env.production
+!**/.env.*.example
+.edgeone/
+.wrangler/
 
-# ---------- Keycloak 联调临时凭据（含 access token，禁止入库） ----------
-**/kc-token.json
+# ===== 编译产物与二进制（严禁入库）=====
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+dist/
+build/
+out/
+*.appimage
+*.AppImage
+*.dmg
+*.deb
+*.msix
+*.hap
+*.tsbuildinfo
 
-# ---------- Agent / 工作区 / 临时 ----------
-.workbuddy/
-_inbox/
+# ===== 前端与子平台构建产物 =====
+email-aggregator-web/dist/
+platforms/desktop/build/
+platforms/desktop/release/
+platforms/desktop/dist/
+platforms/desktop/node_modules/
+platforms/mobile/build/
+platforms/mobile/dist/
+platforms/mobile/node_modules/
+platforms/harmony/build/
+platforms/harmony/.preview/
+platforms/harmony/oh_modules/
+platforms/harmony/**/build/
+
+# ===== 日志、CI 缓存与临时文件 =====
+*.log
 .ci-logs/
-ts-integ.log
-ts-integ.err.log
-.tmp_*.txt
-
-# ---------- Phase 4 新增：Keycloak 联调 / Docker 卷 ----------
-.tmp_*/
-**/.tmp_*/
-email-aggregator-go/.tmp_probe/
-email-aggregator-go/.tmp_q/
-
-# ---------- IDE / 工具 ----------
-.trae/
+.tmp_q/
 .tmp_att/
-**/.edgeone/
+shots/
+.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
 
-# ---------- Docker 卷（运行时数据，勿入库） ----------
-pgdata/
-miniodata/
-osdata/
-rpdata/
-cn_data/
-w1_data/
-w2_data/
-
-# ---------- 报告 / 临时产物 ----------
-*深度审计报告*.md
-邮箱聚合平台系统架构设计.md.bak
+# ===== 系统与编辑器临时文件 =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~

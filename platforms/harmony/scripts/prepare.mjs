@@ -41,8 +41,11 @@ function assertVersions(v) {
     throw new Error(`缺少 ${path.relative(REPO, appJson)}`)
   }
   const txt = fs.readFileSync(appJson, 'utf8')
-  const code = txt.match(/versionCode:\s*(\d+)/)?.[1]
-  const name = txt.match(/versionName:\s*'([^']*)'/)?.[1]
+  // app.json5 是 JSON5，键名带引号（"versionCode": 1 / "versionName": 'MALLVx.y.z'）。
+  // 若用裸 `versionCode: \d+` 会漏匹配 —— 与 scripts/version.mjs 的 harmony-app-json5
+  // 落点正则保持一致（该坑曾导致鸿蒙版本断言在文件已正确时仍误报不一致）。
+  const code = txt.match(/"versionCode":\s*(\d+)/)?.[1]
+  const name = txt.match(/"versionName":\s*'([^']*)'/)?.[1]
   if (Number(code) !== v.code) issues.push(`app.json5 versionCode = ${code}，期望 ${v.code}`)
   if (name !== v.canonical) issues.push(`app.json5 versionName = '${name}'，期望 '${v.canonical}'`)
 

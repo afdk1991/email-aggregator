@@ -1,0 +1,78 @@
+<html style="margin:0;padding:0;">
+<title>邮箱聚合平台 · 全项目架构总览</title>
+<div style="width:100%;box-sizing:border-box;background:#0f172a;color:#e2e8f0;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding:24px 20px;">
+  <div style="font-size:22px;font-weight:700;color:#f8fafc;margin-bottom:4px;">邮箱聚合平台 · 全项目架构总览</div>
+  <div style="font-size:13px;color:#94a3b8;margin-bottom:20px;">项目003 ｜ MALLV0.0.0 ｜ 模块化单体演进 ｜ Go 主干 + TS PoC 对照 + React 前端 + 六端 + 双部署形态</div>
+
+  <!-- 数据流主链 -->
+  <div style="display:flex;align-items:stretch;gap:10px;flex-wrap:wrap;margin-bottom:18px;">
+    <div style="flex:1.4;min-width:280px;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;">
+      <div style="font-size:13px;font-weight:700;color:#38bdf8;margin-bottom:10px;">① 前端层（唯一产物源）</div>
+      <div style="background:#0f172a;border-radius:6px;padding:10px;font-size:12px;line-height:1.7;color:#cbd5e1;">
+        <b>React 18 + TS + Vite</b><br/>
+        邮件列表（虚拟滚动）· 全文检索 · AI 助手 · 实时通知 · 账户管理<br/>
+        <span style="color:#64748b;">同源 /api + /ws ｜ __DEMO_MODE__ 构建期折叠 ｜ 五处产物同步</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;color:#64748b;font-size:18px;">→</div>
+    <div style="flex:1.4;min-width:280px;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;">
+      <div style="font-size:13px;font-weight:700;color:#a78bfa;margin-bottom:10px;">② API / 接入层</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+        <div style="background:#0f172a;border-radius:6px;padding:8px;"><b>ApiServer</b> · REST + WebSocket 同端口<br/><span style="color:#64748b;">health/mails/search/accounts/ai/ws</span></div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;"><b>Connector 适配器</b> · IMAP(纯标准库) / POP3 / Gmail / Graph / EWS<br/><span style="color:#64748b;">归一化为 CanonicalMail（ADR-005）</span></div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;"><b>Auth</b> · RBAC + OIDC SSO(sso 标签) + 审计强约束（ADR-009）</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;color:#64748b;font-size:18px;">→</div>
+    <div style="flex:1.4;min-width:280px;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;">
+      <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:10px;">③ 核心服务层（Go 主干）</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+        <div style="background:#0f172a;border-radius:6px;padding:8px;"><b>SyncOrchestrator</b> · 7 态状态机 → 事件总线（Kafka / InMemory）</div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;"><b>IngestWorker</b> · 落库 → 内容寻址 → 索引 → 通知 → 审计</div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;"><b>AIGateway</b>（ADR-010）· 租户感知路由 + 脱敏 Guardrail</div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;"><b>Security</b> · KMS 信封加密 + OAuth2 PKCE ｜ <b>Observ</b> · 指标注册表 /metrics</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;color:#64748b;font-size:18px;">→</div>
+    <div style="flex:1;min-width:240px;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;">
+      <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:10px;">④ 存储层（接口 + 双实现）</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+        <div style="background:#0f172a;border-radius:6px;padding:8px;">元数据 <b>PG</b>（Citus 分片）<br/><span style="color:#64748b;">InMemory 桩 = 默认</span></div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;">内容 <b>MinIO</b>（sha256 寻址去重）<br/><span style="color:#64748b;">InMemory 桩 = 默认</span></div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;">索引 <b>OpenSearch</b>（mail-&lt;tid&gt;）<br/><span style="color:#64748b;">InMemory 桩 = 默认</span></div>
+        <div style="background:#0f172a;border-radius:6px;padding:8px;">事件 <b>Kafka</b>（5 主题幂等）<br/><span style="color:#64748b;">InMemory 桩 = 默认</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 三套实现与契约 -->
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;margin-bottom:18px;">
+    <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:10px;">⑤ 三套实现 · 同一契约（模型 / 7 态状态机 / 5 主题 / KMS / REST / WS 双向等价）</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;background:#0f172a;border-radius:6px;padding:10px;font-size:12px;">
+        <b style="color:#38bdf8;">TS PoC</b> · email-aggregator<br/><span style="color:#64748b;">零运行时依赖 · Node≥22.6 · 19 单测 · 集成层 Wire() 对齐</span>
+      </div>
+      <div style="flex:1;min-width:200px;background:#0f172a;border-radius:6px;padding:10px;font-size:12px;">
+        <b style="color:#34d399;">Go 主干 ★</b> · email-aggregator-go<br/><span style="color:#64748b;">默认零外部依赖 · 14 包测试 · 12 标签编译 · 真实中间件端到端</span>
+      </div>
+      <div style="flex:1;min-width:200px;background:#0f172a;border-radius:6px;padding:10px;font-size:12px;">
+        <b style="color:#a78bfa;">React 前端</b> · email-aggregator-web<br/><span style="color:#64748b;">tsc 零错误 · 确定性构建 · SHA-256 五处同步 · 无障碍达标</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 部署形态 -->
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;">
+    <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:10px;">⑥ 部署形态与六端（版本号 version.json 单一源 → 21 落点）</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;">
+      <div style="flex:1;min-width:180px;background:#0f172a;border-radius:6px;padding:10px;"><b style="color:#fbbf24;">EdgeOne Serverless</b>（线上 ✅ 36/36）<br/><span style="color:#64748b;">Node 云函数 + Blob 持久化 + BANNED_IDS 防护</span></div>
+      <div style="flex:1;min-width:180px;background:#0f172a;border-radius:6px;padding:10px;"><b style="color:#fbbf24;">容器版（Docker）</b><br/><span style="color:#64748b;">webui 单二进制 · 长驻 WS + 定时推送 · 用户 Docker Desktop 路径</span></div>
+      <div style="flex:1;min-width:180px;background:#0f172a;border-radius:6px;padding:10px;"><b style="color:#fbbf24;">Web / 单二进制</b><br/><span style="color:#64748b;">go build -tags webui 内嵌 SPA</span></div>
+      <div style="flex:1;min-width:180px;background:#0f172a;border-radius:6px;padding:10px;"><b style="color:#fbbf24;">桌面 / 移动 / 鸿蒙</b><br/><span style="color:#64748b;">Electron + Capacitor + HarmonyOS Web 容器</span></div>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:#94a3b8;background:#0f172a;border-radius:6px;padding:8px;">
+      工程化纪律：产物五处同步（SHA-256 复验）· 发布器六环节门禁 · CI 三工作流（version-guard / 集成栈真实中间件 / 六端发布 preflight）· 唯一待补：<span style="color:#fbbf24;">集成中间件 Docker 运行时联调</span>
+    </div>
+  </div>
+</div>
+</html>
