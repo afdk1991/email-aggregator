@@ -2,7 +2,7 @@
 .SYNOPSIS
   Phase 3 真实 Citus 集群分片验证（1C+2W 拓扑）
 .DESCRIPTION
-  前置：deploy/docker-compose.citus.yml 已启动并跑过 006_citus_workers.sql + 002_citus_sharding.sql。
+  前置：已启动 Citus 集群（1 coordinator + 2 worker）并跑过 006_citus_workers.sql + 002_citus_sharding.sql。
   本脚本向 mail_metadata 插入若干虚拟租户的样本行，然后查询：
     1. pg_dist_node 节点拓扑（期望：3 行，1 coordinator + 2 worker）
     2. citus_tables 分布式表清单（期望：mail_metadata, account_sync_cursor，均按 tenant_id 分布）

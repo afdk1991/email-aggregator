@@ -221,8 +221,7 @@ cd email-aggregator && node scripts/bootstrap-integration.mjs && npx --yes tsx t
 
 ```bash
 # 本地构建并验证（构建上下文为仓库根）
-docker build -f deploy/container/Dockerfile -t email-aggregator:latest .
-docker run --rm -p 8080:8080 email-aggregator:latest
+> **注：原 Docker 部署/运行指令已移除，请改用对应服务的原生运行方式（如 `go run` / `npm run dev` / `python -m` / 直接启动构建产物）。**
 # 打开 http://localhost:8080
 
 # 部署到 Render 免费层：控制台 → New → Blueprint → 选本仓库（自动读取 render.yaml）

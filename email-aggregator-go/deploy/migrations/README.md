@@ -57,7 +57,7 @@ CI 会枚举本目录下所有 `[0-9]*.sql` 并**在纯 `postgres:16` 上逐个�
 cd deploy && docker compose up -d
 
 # 2. 等待 PostgreSQL 就绪
-docker compose exec postgres pg_isready -U agg
+> **注：原 Docker 部署/运行指令已移除，请改用对应服务的原生运行方式（如 `go run` / `npm run dev` / `python -m` / 直接启动构建产物）。**
 
 # 3. 执行迁移
 cd migrations && bash run.sh up
@@ -99,8 +99,6 @@ postgres:
 
 ```bash
 # 等 PG 就绪后重放迁移（容器内有 psql，无需本机安装）
-docker compose exec postgres psql -U "$PG_USER" -d "$PG_DATABASE" -v ON_ERROR_STOP=1 \
-  -f /migrations/001_init.sql -f /migrations/002_citus_sharding.sql
 ```
 
 > 说明：`002_citus_sharding.sql` 已用 `DO $$` 守卫——无 Citus 扩展时静默跳过，

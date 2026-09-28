@@ -117,8 +117,7 @@ curl -X PUT http://localhost:9200/_index_template/mail \
 
 ```bash
 # 容器内 kafka-topics.sh（bootstrap.sh 已自动执行；手动等价命令）
-docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
-  --create --if-not-exists --topic sync-tasks --partitions 1 --replication-factor 1
+> **注：原 Docker 部署/运行指令已移除，请改用对应服务的原生运行方式（如 `go run` / `npm run dev` / `python -m` / 直接启动构建产物）。**
 # 其余主题：mail-ingested / mail-index / notifications / audit（同上）
 # 亦可依赖 auto-create：compose 已设 KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
 ```

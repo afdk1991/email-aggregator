@@ -2,7 +2,7 @@
 # Prometheus 抓取配置（Phase 2 / 蓝图 §10 监控与运维体系）
 # -----------------------------------------------------------------------------
 # 抓取目标（全部经 docker compose 网络，按 service:port 寻址）：
-#   - email-aggregator          :8080  /metrics         一体化模式（宿主机运行时用 host.docker.internal）
+#   - email-aggregator          :8080  /metrics         一体化模式（宿主机运行时用 localhost）
 #   - sync_worker               :8081  /metrics         同步编排器（订阅 sync-tasks）
 #   - ingest_worker             :8082  /metrics         摄取消费侧（订阅 mail-ingested）
 #   - search_service            :8083  /metrics         HTTP 检索服务
@@ -13,7 +13,7 @@
 #
 # 注：
 #   1) email-aggregator 一体化模式为宿主机运行（go run -tags integration ./cmd/server_integration.go），
-#      因此用 host.docker.internal:8080 抓取；若改为容器化部署，把 target 改为 email-aggregator:8080。
+#      因此用 localhost:8080 抓取；若改为容器化部署，把 target 改为 email-aggregator:8080。
 #   2) Phase 2 服务拆分后，三个 worker 为 Docker 容器，直接用 service 名寻址。
 #   3) opensearch security 默认启用，需带 Authorization 头（Basic admin:<pass>），
 #      凭证与 deploy/.env 的 OPENSEARCH_INITIAL_ADMIN_PASSWORD 一致。
@@ -40,7 +40,7 @@ scrape_configs:
   - job_name: email-aggregator
     metrics_path: /metrics
     static_configs:
-      - targets: ["host.docker.internal:8080"]
+      - targets: ["localhost:8080"]
         labels:
           service: email-aggregator
           component: app
@@ -59,7 +59,7 @@ scrape_configs:
         labels:
           service: email-aggregator
           component: sync_worker
-    # 宿主机运行时：targets: ["host.docker.internal:8081"]
+    # 宿主机运行时：targets: ["localhost:8081"]
 
   # ingest_worker：摄取消费侧指标（ingest_total / ingest_duration_ms / os_index_duration_ms）
   - job_name: ingest_worker
@@ -69,7 +69,7 @@ scrape_configs:
         labels:
           service: email-aggregator
           component: ingest_worker
-    # 宿主机运行时：targets: ["host.docker.internal:8082"]
+    # 宿主机运行时：targets: ["localhost:8082"]
 
   # search_service：检索服务指标（os_search_duration_ms / pg_query_duration_ms）
   - job_name: search_service
@@ -79,7 +79,7 @@ scrape_configs:
         labels:
           service: email-aggregator
           component: search_service
-    # 宿主机运行时：targets: ["host.docker.internal:8083"]
+    # 宿主机运行时：targets: ["localhost:8083"]
 
   # ── PostgreSQL / Citus exporter ──
   # 指标：pg_up / pg_stat_database_tup_* / pg_stat_activity_count / citus_*

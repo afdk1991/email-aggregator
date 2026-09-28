@@ -1,6 +1,6 @@
 ﻿# =============================================================================
 # Phase 4 / ADR-009：Keycloak OIDC 真实联调验证脚本
-# 前置：docker compose -f deploy/docker-compose.keycloak.yml --env-file deploy/.env.keycloak up -d
+# 前置：已启动 Keycloak 服务（默认 http://localhost:8484）
 # 用法：.\scripts\verify-keycloak-oidc.ps1
 # 退出码：0 全绿 ｜ 1 失败
 # =============================================================================

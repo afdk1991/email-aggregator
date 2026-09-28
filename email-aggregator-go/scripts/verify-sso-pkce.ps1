@@ -6,7 +6,7 @@
 #       -> Bearer access_token against /api/mails
 #
 # Preconditions:
-#   - Keycloak prod stack up (docker-compose.keycloak-prod.yml) on 8443
+#   - Keycloak prod 已启动（端口 8443）
 #   - Go server built with -tags integration,sso listening on $AppBase
 #     (HTTP_PORT=18080 locally because host 8080 is taken by another service;
 #      OIDC_REDIRECT_URI stays the registered https://localhost:8080/...)

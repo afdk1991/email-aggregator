@@ -109,7 +109,7 @@ try {
             if ($LASTEXITCODE -eq 0) { Ok 'go build -tags integration PASS' } else { Bad "集成构建失败 RC=$LASTEXITCODE" }
 
             # 真实中间件联调：Go 集成测试（真实 Kafka e2e）+ TS 集成层真实联调。
-            # 需本地已启动 deploy/docker-compose.yml 中间件栈（PG/MinIO/OpenSearch/Kafka）。
+            # 需本地已启动中间件栈（PG/MinIO/OpenSearch/Kafka）。
             go test -tags integration ./src/integration/ 2>&1 | Tee-Object -FilePath (Join-Path $LogDir 'go-integ-test.log') | Select-Object -Last 4
             if ($LASTEXITCODE -eq 0) { Ok 'go test -tags integration ./src/integration/ PASS' } else { Bad "Go 集成测试失败 RC=$LASTEXITCODE" }
         }

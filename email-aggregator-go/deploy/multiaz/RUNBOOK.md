@@ -41,31 +41,23 @@ MINIO_ROOT_PASSWORD=agg-secret
 ### 3.2 启动双 AZ 栈
 ```powershell
 cd deploy
-docker compose -f docker-compose.multiaz.yml up -d
+> **注：原 Docker 部署/运行指令已移除，请改用对应服务的原生运行方式（如 `go run` / `npm run dev` / `python -m` / 直接启动构建产物）。**
 # 等待 pg-replica 完成 basebackup + 进入 hot standby：
-docker compose -f docker-compose.multiaz.yml ps
 # pg-replica 状态应为 healthy
 ```
 
 ### 3.3 验证 PG 流复制
 ```sh
-docker compose -f docker-compose.multiaz.yml exec pg-primary \
-  psql -U agg -d mailagg -c "SELECT * FROM pg_stat_replication;"
 # 期望：state=streaming, sync_state=async, sent_lsn≈replay_lsn
 ```
 
 ### 3.4 验证 Kafka 双 broker
 ```sh
-docker compose -f docker-compose.multiaz.yml exec kafka-a \
-  /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-a:9092 \
-  --describe --topic mail-ingested
 # 期望：ReplicationFactor:2, Isr: 1,2
 ```
 
 ### 3.5 初始化 MinIO site replication（首次启动后执行一次）
 ```powershell
-docker compose -f docker-compose.multiaz.yml run --rm mc \
-  mc admin replicate add minio-a minio-b
 # 期望：Site replication successfully configured
 ```
 
@@ -96,26 +88,19 @@ docker compose -f docker-compose.multiaz.yml run --rm mc \
 
 **步骤 1：在 primary 写入测试数据**
 ```sh
-docker compose -f docker-compose.multiaz.yml exec pg-primary \
-  psql -U agg -d mailagg -c "INSERT INTO multiaz_drill (tenant_id) VALUES ('manual-1');"
 ```
 
 **步骤 2：注入故障**
 ```powershell
-docker compose -f docker-compose.multiaz.yml stop pg-primary
 ```
 
 **步骤 3：在 replica 上执行 failover**
 ```sh
-docker compose -f docker-compose.multiaz.yml exec pg-replica \
-  psql -U agg -d mailagg -c "SELECT pg_promote();"
 # 期望：t（promote 成功）
 ```
 
 **步骤 4：验证 replica 可写**
 ```sh
-docker compose -f docker-compose.multiaz.yml exec pg-replica \
-  psql -U agg -d mailagg -c "INSERT INTO multiaz_drill (tenant_id) VALUES ('post-failover');"
 ```
 
 **步骤 5：业务恢复时间 = 步骤 2 至步骤 4 成功的时间差**
@@ -124,24 +109,16 @@ docker compose -f docker-compose.multiaz.yml exec pg-replica \
 
 ### 5.1 注入故障
 ```powershell
-docker compose -f docker-compose.multiaz.yml stop kafka-a
 ```
 
 ### 5.2 验证 kafka-b 仍可读写
 ```sh
-docker compose -f docker-compose.multiaz.yml exec kafka-b \
-  /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka-b:9092 \
-  --topic drill-test <<< "post-failover-message"
 
-docker compose -f docker-compose.multiaz.yml exec kafka-b \
-  /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka-b:9092 \
-  --topic drill-test --from-beginning --max-messages 1
 # 期望：能读到刚才写入的消息（replica 在 kafka-b 上仍可服务）
 ```
 
 ### 5.3 恢复
 ```powershell
-docker compose -f docker-compose.multiaz.yml start kafka-a
 # ISR 自动重新同步
 ```
 
@@ -149,23 +126,15 @@ docker compose -f docker-compose.multiaz.yml start kafka-a
 
 ### 6.1 注入故障
 ```powershell
-docker compose -f docker-compose.multiaz.yml stop minio-a
 ```
 
 ### 6.2 验证 minio-b 仍可读写
 ```powershell
-docker compose -f docker-compose.multiaz.yml exec minio-b mc \
-  ls minio-b/agg-mail/  # 列出对象
-docker compose -f docker-compose.multiaz.yml exec minio-b mc \
-  cp - minio-b/agg-mail/drill-test.txt <<< "post-failover"
 ```
 
 ### 6.3 恢复 + 验证 site replication 追平
 ```powershell
-docker compose -f docker-compose.multiaz.yml start minio-a
 # 等待 10s，验证 minio-a 上能看到 step 6.2 写入的对象
-docker compose -f docker-compose.multiaz.yml exec minio-a mc \
-  ls minio-a/agg-mail/  # 应包含 drill-test.txt
 ```
 
 ## 7. 完整故障切换演练剧本（综合场景）
@@ -179,11 +148,8 @@ docker compose -f docker-compose.multiaz.yml exec minio-a mc \
 ### 7.2 步骤
 ```powershell
 # 1. 一键停止整个 AZ-A
-docker compose -f docker-compose.multiaz.yml stop pg-primary kafka-a minio-a
 
 # 2. PG failover（手动 promote）
-docker compose -f docker-compose.multiaz.yml exec pg-replica \
-  psql -U agg -d mailagg -c "SELECT pg_promote();"
 
 # 3. Kafka 切换：bootstrap-server 改为 kafka-b:9092
 #    应用层只需改 KAFKA_BROKERS 环境变量为 kafka-b:9092 即可

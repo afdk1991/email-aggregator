@@ -9,10 +9,10 @@
 services:
   - type: web
     name: email-aggregator
-    runtime: docker
-    dockerfilePath: ./deploy/container/Dockerfile
-    dockerContext: .
+    env: go
     plan: free
+    buildCommand: cd email-aggregator-go && go build -o app .
+    startCommand: ./app
     region: singapore
     healthCheckPath: /api/health
     autoDeploy: true
