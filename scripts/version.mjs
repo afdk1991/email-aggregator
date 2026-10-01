@@ -446,52 +446,6 @@ const TARGETS = [
     ],
   },
 
-  // ── 容器与编排 ────────────────────────────────────────────────────────
-  {
-    id: 'docker-compose-tag',
-    file: 'deploy/container/docker-compose.yml',
-    label: '容器镜像 tag',
-    edits: [
-      regexEdit(
-        /image: email-aggregator:p003[0-9A-Za-z.\-]*/,
-        'image tag',
-        (v) => `image: email-aggregator:p003-${v.canonical}`,
-      ),
-    ],
-  },
-  {
-    id: 'dockerfile-labels',
-    file: 'deploy/container/Dockerfile',
-    label: '容器镜像 OCI 标签',
-    edits: [
-      regexEdit(
-        /LABEL org\.opencontainers\.image\.version="[^"]*"/,
-        'OCI version 标签',
-        (v) => `LABEL org.opencontainers.image.version="${v.canonical}"`,
-        { insertAfter: /^FROM .*$/m },
-      ),
-      regexEdit(
-        /LABEL org\.opencontainers\.image\.revision="[^"]*"/,
-        'OCI revision 标签',
-        (v) => `LABEL org.opencontainers.image.revision="${v.canonical}"`,
-        { insertAfter: /LABEL org\.opencontainers\.image\.version="[^"]*"/ },
-      ),
-    ],
-  },
-  {
-    id: 'web-dockerfile-labels',
-    file: 'email-aggregator-web/Dockerfile',
-    label: '前端镜像 OCI 标签',
-    edits: [
-      regexEdit(
-        /LABEL org\.opencontainers\.image\.version="[^"]*"/,
-        'OCI version 标签',
-        (v) => `LABEL org.opencontainers.image.version="${v.canonical}"`,
-        { insertAfter: /^FROM .*$/m },
-      ),
-    ],
-  },
-
   // ── 桌面端（Electron）产物 ────────────────────────────────────────────
   {
     id: 'electron-builder',

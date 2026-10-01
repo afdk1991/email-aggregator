@@ -61,9 +61,9 @@ jobs:
       semver: ${{ steps.v.outputs.semver }}
       code: ${{ steps.v.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -142,13 +142,13 @@ jobs:
             name: linux
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -176,7 +176,7 @@ jobs:
         run: node scripts/verify-artifacts.mjs
 
       - name: 上传产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.name }}-${{ needs.version-guard.outputs.canonical }}
           path: |
@@ -207,7 +207,7 @@ jobs:
 
       - name: 上传 Go 单二进制
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: go-server-${{ needs.version-guard.outputs.canonical }}
           path: email-aggregator-go/release/*
@@ -220,9 +220,9 @@ jobs:
     needs: version-guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -238,7 +238,7 @@ jobs:
       # （实测 run 35120977342，BUILD FAILED in 45s），极易误判成 SDK 或 AGP 问题。
       # AGP 8.13.0 本身要求 JDK 17+，21 满足；platforms/mobile/scripts/build.mjs
       # 也加了 JDK 主版本预检，低于 21 直接给出可读错误。
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -331,7 +331,7 @@ jobs:
         working-directory: platforms/mobile
         run: node scripts/verify-artifacts.mjs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-${{ needs.version-guard.outputs.canonical }}
           path: |
@@ -346,9 +346,9 @@ jobs:
     needs: version-guard
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -422,7 +422,7 @@ jobs:
           grep -q 'App\.xcarchive/Info\.plist' "$RUNNER_TEMP/p003-xcalist.txt"
           echo "归档条目数：$(grep -c 'App\.xcarchive/' "$RUNNER_TEMP/p003-xcalist.txt")"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios-${{ needs.version-guard.outputs.canonical }}
           # 只上传 .zip 单文件。原始目录束留在 runner 上即可 —— zip 里是同样的内容，
@@ -447,13 +447,13 @@ jobs:
     if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
 
@@ -540,9 +540,9 @@ jobs:
     if: vars.HARMONY_RUNNER == 'true'
     runs-on: [self-hosted, harmony]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -566,7 +566,7 @@ jobs:
         working-directory: platforms/harmony
         run: node scripts/build.mjs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: harmony-${{ needs.version-guard.outputs.canonical }}
           # 与 scripts/build.mjs 的产物扫描根一致（entry/build/**），
